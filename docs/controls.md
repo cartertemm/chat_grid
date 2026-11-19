@@ -56,6 +56,8 @@ This document is the authoritative keymap for the client.
 
 ### Wall doors
 
+The keypad beeps once per digit. The success or failure sound plays after the fourth beep and a 0.3-second pause.
+
 - Press Enter (touch Use) beside a door to open or close it. When a door shares a square with a usable item, choose the target. C includes each adjacent door's direction and state.
 - From a keypad-protected side, Enter at a locked door requests unlock. If a PIN is required, enter four digits in the masked field. The fourth digit submits. After a successful unlock the door is still closed and anyone can open it with Enter. The free side of a one-sided door can open without a PIN.
 - Shift+Enter (or the secondary action under Commands) requests manual Lock or Unlock. Closing an unlocked door leaves it unlocked. Only one person can enter digits on a door at once. Cancel or ten seconds without input releases the keypad.

@@ -570,7 +570,7 @@ export class AudioEngine {
     }
   }
 
-  async playSample(url: string, gain = 1, fadeInMs = 0): Promise<void> {
+  async playSample(url: string, gain = 1, fadeInMs = 0, waitForEnd = false): Promise<void> {
     await this.ensureContext();
     const { audioCtx, sfxGainNode } = this;
     if (!audioCtx || !sfxGainNode) return;
@@ -590,7 +590,9 @@ export class AudioEngine {
         gainNode.gain.setTargetAtTime(gain, audioCtx.currentTime, ONE_SHOT_ATTACK_SECONDS);
       }
       source.connect(gainNode).connect(sfxGainNode);
+      const ended = waitForEnd ? new Promise<void>((resolve) => { source.onended = () => resolve(); }) : null;
       source.start();
+      if (ended) await ended;
     } catch {
       // Ignore sample decode/load errors.
     }

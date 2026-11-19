@@ -66,7 +66,7 @@ describe('door controls', () => {
     Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: vi.fn() });
     const choose = vi.fn();
     const controls = createDoorControls({ send: vi.fn(), choose, confirm: vi.fn(), status: vi.fn(),
-      normal: vi.fn(), focusGrid: vi.fn(), gridSize: () => 41, cue: vi.fn() });
+      normal: vi.fn(), focusGrid: vi.fn(), gridSize: () => 41, cue: vi.fn(), keypadSound: vi.fn() });
     const plain = { ...wall, doors: wall.doors?.map(d => ({ ...d, unlockMode: 'none' as const, hasPin: false })) };
     controls.edit(plain, vi.fn());
     choose.mock.lastCall![0].onSelect('d');
@@ -81,7 +81,9 @@ describe('door controls', () => {
     expect(group.querySelectorAll('select')[1].value).toBe('unlock');
   });
 
-  it('submits four private digits and waits for a separate press to open', () => {
+  it.each([true, false])('plays the server result after four beeps and a pause (accepted: %s)', async (ok) => {
+    vi.useFakeTimers();
+    const keypadSound = vi.fn().mockResolvedValue(undefined);
     Object.defineProperties(HTMLDialogElement.prototype, {
       showModal: { configurable: true, value: vi.fn() },
       close: { configurable: true, value: vi.fn() },
@@ -96,6 +98,7 @@ describe('door controls', () => {
       focusGrid: vi.fn(),
       gridSize: () => 41,
       cue: vi.fn(),
+      keypadSound,
     });
     const [target] = adjacentDoors([wall], 1, 1, 0);
     controls.use(target, false);
@@ -115,9 +118,14 @@ describe('door controls', () => {
     input.value = '0042';
     input.dispatchEvent(new Event('input'));
     expect(send.mock.calls.slice(1).map(([packet]) => packet.digit)).toEqual(['0', '0', '4', '2']);
-    controls.result({ ...result, action: 'keypad_digit', message: 'Unlocked.', keypadActive: false });
+    controls.result({ ...result, ok, action: 'keypad_digit', message: ok ? 'Unlocked.' : 'Incorrect PIN.', keypadActive: false });
     expect(document.querySelector('dialog')).toBeNull();
     expect(send).toHaveBeenCalledTimes(5);
+    await vi.advanceTimersByTimeAsync(299);
+    expect(keypadSound.mock.calls.flat()).toEqual(Array(4).fill('keypad'));
+    await vi.advanceTimersByTimeAsync(1);
+    expect(keypadSound.mock.lastCall).toEqual([ok ? 'keypad_good' : 'keypad_bad']);
+    if (!ok) return;
     controls.use({ ...target, door: { ...target.door, isLocked: false } }, false);
     expect(send.mock.lastCall?.[0].action).toBe('open');
   });

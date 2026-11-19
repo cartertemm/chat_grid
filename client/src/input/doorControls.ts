@@ -14,6 +14,7 @@ type Deps = {
   focusGrid: () => void;
   gridSize: () => number;
   cue: (success: boolean) => void;
+  keypadSound: (name: 'keypad' | 'keypad_good' | 'keypad_bad') => Promise<void>;
 };
 
 function field(parent: HTMLElement, title: string, control: HTMLInputElement | HTMLSelectElement) {
@@ -47,8 +48,14 @@ export function createDoorControls(deps: Deps) {
   let keypad: { structureId: string; doorId: string } | null = null;
   let pending: { structureId: string; doorId: string } | null = null;
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  let audioSession = 0;
+  let digitSounds = Promise.resolve();
+  let submitted = false;
 
-  function close() {
+  function close(keepResultAudio = false) {
+    if (!keepResultAudio) audioSession++;
+    digitSounds = Promise.resolve();
+    submitted = false;
     clearTimeout(idleTimer);
     keypad = null;
     pending = null;
@@ -81,7 +88,7 @@ export function createDoorControls(deps: Deps) {
     const node = document.createElement('button');
     node.type = 'button';
     node.textContent = label;
-    node.onclick = action;
+    node.onclick = () => action();
     parent.append(node);
   }
 
@@ -307,18 +314,34 @@ export function createDoorControls(deps: Deps) {
           input.value = sent;
           return;
         }
-        for (const digit of value.slice(sent.length))
+        const session = audioSession;
+        for (const digit of value.slice(sent.length)) {
+          digitSounds = digitSounds.then(async () => {
+            if (session === audioSession) await deps.keypadSound('keypad').catch(() => undefined);
+          });
           deps.send({ type: 'door_action', action: 'keypad_digit', ...key, digit });
+        }
         sent = value;
-        if (sent.length === 4) input.readOnly = true;
+        if (sent.length === 4 && !submitted) {
+          input.readOnly = submitted = true;
+          digitSounds = digitSounds.then(() => new Promise<void>((resolve) => setTimeout(resolve, 300)));
+        }
         resetIdle();
       };
       box.showModal();
       input.focus();
       resetIdle();
     } else if (!reply.keypadActive && (matches(keypad) || matches(pending))) {
-      close();
-      deps.cue(reply.ok);
+      if (matches(keypad) && submitted && reply.action === 'keypad_digit') {
+        const session = audioSession;
+        void digitSounds.then(() => {
+          if (session === audioSession) return deps.keypadSound(reply.ok ? 'keypad_good' : 'keypad_bad');
+        }).catch(() => undefined);
+        close(true);
+      } else {
+        close();
+        deps.cue(reply.ok);
+      }
     }
   }
   return { edit, use, result, close };

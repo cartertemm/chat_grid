@@ -657,6 +657,7 @@ const doorControls = createDoorControls({
   status: updateStatus, normal: () => { state.mode = 'normal'; },
   focusGrid: () => dom.canvas.focus(), gridSize: () => worldGridSize,
   cue: (success) => success ? audio.sfxUiConfirm() : audio.sfxUiCancel(),
+  keypadSound: (name) => audio.playSample(resolveIncomingSoundUrl(`/sounds/${name}.ogg`), 1, 0, true),
 });
 const worldBuilderController = createWorldBuilderController({
   editDoors: doorControls.edit,
