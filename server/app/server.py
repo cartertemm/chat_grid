@@ -126,6 +126,8 @@ from .models import (
 )
 from .network_security import normalize_origin
 from .structure_service import StructureError, StructureService
+from .door_runtime import DoorRuntime
+from .models import DoorActionPacket, DoorActionResultPacket, WallDoor
 from .ui_metadata import (
     ADMIN_MENU_ACTION_DEFINITIONS,
     ITEM_MANAGEMENT_ACTION_DEFINITIONS,
@@ -345,6 +347,38 @@ class SignalingServer:
         self._auth_failures_by_identity: dict[str, deque[float]] = {}
         self._started_at_monotonic = time.monotonic()
         self._pending_reboot_task: asyncio.Task[None] | None = None
+        self.door_runtime = DoorRuntime(
+            self.structure_service,
+            now_ms=self.item_service.now_ms,
+            publish=self._publish_door_wall,
+            notify=self.delivery.send,
+            sound=self._play_door_sound,
+        )
+
+    async def _publish_door_wall(self, wall: WallStructure) -> None:
+        """Save and broadcast one authoritative wall after a door transition."""
+
+        self._request_state_save()
+        await self.delivery.broadcast(
+            StructureUpsertPacket(type="structure_upsert", structure=wall)
+        )
+
+    async def _play_door_sound(
+        self, wall: WallStructure, door: WallDoor, opened: bool
+    ) -> None:
+        """Emit one existing movement sample from the doorway's positive tile."""
+
+        await self.delivery.broadcast(
+            WorldSoundPacket(
+                type="world_sound",
+                sound="/sounds/door_open.ogg" if opened else "/sounds/door_close.ogg",
+                x=wall.startX
+                + (door.offset if wall.orientation == "horizontal" else 0),
+                y=wall.startY + (door.offset if wall.orientation == "vertical" else 0),
+                z=wall.floorZ,
+                acousticZoneId=floor_acoustic_zone_id(wall.floorZ),
+            )
+        )
 
     @property
     def livekit_enabled(self) -> bool:
@@ -966,6 +1000,7 @@ class SignalingServer:
             "starting signaling server on %s://%s:%d", protocol, self.host, self.port
         )
         self.item_runtime.start()
+        self.door_runtime.start()
         try:
             async with serve(
                 self._handle_client,
@@ -978,6 +1013,7 @@ class SignalingServer:
             ):
                 await asyncio.Future()
         finally:
+            await self.door_runtime.stop()
             await self.item_runtime.shutdown()
             if self._pending_reboot_task is not None:
                 self._pending_reboot_task.cancel()
@@ -1035,6 +1071,7 @@ class SignalingServer:
                 # Each step is guarded so one failure cannot skip the rest or
                 # stop other users from hearing that this user left.
                 try:
+                    self.door_runtime.release_client(disconnected)
                     await self.item_runtime.prepare_client_disconnect(disconnected)
                 except Exception:
                     LOGGER.exception(
@@ -1085,6 +1122,7 @@ class SignalingServer:
     async def _send_welcome(self, client: ClientConnection) -> None:
         """Send initial world snapshot to a newly connected client."""
 
+        await self.door_runtime.expire()
         users = [
             RemoteUser(
                 id=other.id,
@@ -2289,7 +2327,10 @@ class SignalingServer:
         try:
             packet = CLIENT_PACKET_ADAPTER.validate_python(payload)
         except ValidationError as exc:
-            PACKET_LOGGER.warning("invalid packet from id=%s: %s", client.id, exc)
+            if isinstance(payload, dict) and payload.get("type") == "door_action":
+                PACKET_LOGGER.warning("invalid door packet from id=%s", client.id)
+            else:
+                PACKET_LOGGER.warning("invalid packet from id=%s: %s", client.id, exc)
             return
 
         if await self._handle_auth_packet(client, packet):
@@ -2353,6 +2394,30 @@ class SignalingServer:
         if await self._handle_admin_packet(client, packet):
             return
 
+        if isinstance(packet, DoorActionPacket):
+            try:
+                if not self._consume_rate_limit(client, "item_updates"):
+                    raise StructureError(
+                        "You are changing doors too quickly. Please wait."
+                    )
+                result = await self.door_runtime.handle(
+                    client,
+                    packet,
+                    can_edit=lambda: self._client_has_permission(
+                        client, "world.structure.edit"
+                    ),
+                )
+            except StructureError as exc:
+                result = DoorActionResultPacket(
+                    type="door_action_result",
+                    ok=False,
+                    action=packet.action,
+                    message=str(exc),
+                    structureId=packet.structureId,
+                    doorId=packet.doorId,
+                )
+            await self.delivery.send(client, result)
+            return
         if await self._handle_structure_packet(client, packet):
             return
 

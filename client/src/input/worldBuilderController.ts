@@ -20,6 +20,7 @@ import type { AmbianceType } from '../state/gameState';
 type MenuEntry<T extends string = string> = { id: T; label: string; tooltip?: string };
 
 export type WorldBuilderDeps = {
+  editDoors?: (wall: WallStructure, back: () => void) => void;
   state: GameState;
   hasPermission: (key: string) => boolean;
   send: (message: OutgoingMessage) => void;
@@ -54,6 +55,7 @@ const WALL_ACTIONS = [
   { id: 'setEnd', label: 'Set end edge', tooltip: 'Use Left or Right to decrease or increase the last occupied edge coordinate by one square.' },
   { id: 'slide', label: 'Slide', tooltip: 'Use Left or Right to move the complete wall perpendicular to its run by one square.' },
   { id: 'properties', label: 'Edit properties', tooltip: 'Edit the wall’s sound transmission, filtering, or contact sound.' },
+  { id: 'doors', label: 'Doors', tooltip: 'Manage doors along this wall.' },
   { id: 'delete', label: 'Delete wall', tooltip: 'Delete this entire wall run.' },
 ] as const;
 const PROPERTY_ACTIONS = [
@@ -361,6 +363,14 @@ export function createWorldBuilderController(deps: WorldBuilderDeps) {
         deps.cancel();
         return;
       }
+      if (action === 'doors') {
+        deps.editDoors?.(wall, () => {
+          const current = selectedWall();
+          if (current) openWallActions(current);
+          else openWallList();
+        });
+        return;
+      }
       if (action === 'properties') {
         index = 0;
         deps.state.mode = 'worldBuilderPropertyList';
@@ -390,7 +400,7 @@ export function createWorldBuilderController(deps: WorldBuilderDeps) {
       }
       if (action === 'delete') {
         deps.openConfirmation({
-          prompt: `Delete ${wall.title}?`,
+          prompt: `Delete ${wall.title}${wall.doors?.length ? " and its " + wall.doors.length + " attached doors" : ""}?`,
           onConfirm: () => {
             deps.send({ type: 'structure_delete', structureId: wall.id });
             deps.state.mode = 'normal';

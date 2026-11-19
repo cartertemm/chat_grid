@@ -83,6 +83,7 @@ type MessageHandlerDeps = {
   handleAdminActionResult: (message: Extract<IncomingMessage, { type: 'admin_action_result' }>) => void;
   handleItemTransferTargets: (message: Extract<IncomingMessage, { type: 'item_transfer_targets' }>) => void;
   handleItemHandTargets: (message: Extract<IncomingMessage, { type: 'item_hand_targets' }>) => void;
+  handleDoorResult?: (message: Extract<IncomingMessage, {type: 'door_action_result'}>) => void;
   handleStructureActionResult: (message: Extract<IncomingMessage, { type: 'structure_action_result' }>) => void;
   handleRegionActionResult?: (message: Extract<IncomingMessage, { type: 'region_action_result' }>) => void;
   handleAmbianceActionResult: (message: Extract<IncomingMessage, { type: 'ambiance_action_result' }>) => void;
@@ -120,6 +121,9 @@ export function createOnMessageHandler(deps: MessageHandlerDeps): (message: Inco
         break;
       case 'item_hand_targets':
         deps.handleItemHandTargets(message);
+        break;
+      case 'door_action_result':
+        deps.handleDoorResult?.(message);
         break;
       case 'structure_action_result':
         deps.handleStructureActionResult(message);

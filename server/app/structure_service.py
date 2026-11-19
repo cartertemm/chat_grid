@@ -10,7 +10,7 @@ from typing import Literal, cast
 import uuid
 
 from .client import ClientConnection
-from .models import WallStructure
+from .models import WallStructure, WallDoor
 from .state_files import read_state_text, set_aside_unreadable, write_json_atomic
 
 LOGGER = logging.getLogger("chgrid.server.structures")
@@ -37,6 +37,7 @@ class StructureService:
         self.presets = {str(key): dict(value) for key, value in presets.items()}
         self.structures: dict[str, WallStructure] = {}
         self._edges: dict[tuple[int, str, int, int], str] = {}
+        self.door_pins: dict[str, str] = {}
         self.load_state()
 
     def preset_snapshot(self) -> list[dict[str, object]]:
@@ -108,6 +109,11 @@ class StructureService:
         if wall is None:
             raise StructureError("Wall not found.")
         values = wall.model_dump()
+        if endpoint == "start":
+            for door in values["doors"]:
+                door["offset"] -= delta
+        if any(door["offset"] < 0 for door in values["doors"]):
+            raise StructureError("Remove the door before trimming that wall edge.")
         if endpoint == "start":
             if delta < 0:
                 values["startX" if wall.orientation == "horizontal" else "startY"] -= 1
@@ -238,6 +244,8 @@ class StructureService:
             raise StructureError("Wall not found.")
         self._remove_from_index(wall)
         del self.structures[structure_id]
+        for door in wall.doors:
+            self.door_pins.pop(door.id, None)
         return wall
 
     def blocking_wall_for_move(
@@ -306,7 +314,15 @@ class StructureService:
         if self.state_file is None:
             return
         try:
-            payload = [wall.model_dump() for wall in self.structures.values()]
+            payload = []
+            for wall in self.structures.values():
+                entry = wall.model_dump()
+                entry["doorPins"] = {
+                    door.id: self.door_pins[door.id]
+                    for door in wall.doors
+                    if door.id in self.door_pins
+                }
+                payload.append(entry)
             write_json_atomic(self.state_file, payload)
         except Exception as exc:
             LOGGER.warning(
@@ -328,6 +344,17 @@ class StructureService:
             for entry in raw:
                 wall = WallStructure.model_validate(entry)
                 self._validate_wall(wall)
+                pins = entry.get("doorPins", {})
+                if not isinstance(pins, dict):
+                    raise StructureError("Door PIN state is invalid.")
+                for door in wall.doors:
+                    if door.hasPin:
+                        verifier = pins.get(door.id)
+                        if not isinstance(verifier, str) or not verifier.startswith(
+                            "$argon2"
+                        ):
+                            raise StructureError("Door PIN verifier is missing.")
+                        self.door_pins[door.id] = verifier
                 self._insert(wall)
             LOGGER.info(
                 "loaded %d structures from %s", len(self.structures), self.state_file
@@ -335,6 +362,7 @@ class StructureService:
         except Exception as exc:
             self.structures.clear()
             self._edges.clear()
+            self.door_pins.clear()
             if not set_aside_unreadable(self.state_file, exc):
                 self.state_file = None
 
@@ -368,6 +396,27 @@ class StructureService:
             )
         if not in_bounds:
             raise StructureError("Wall would extend outside the world.")
+        offsets: set[int] = set()
+        ids: set[str] = set()
+        for door in wall.doors:
+            if door.offset >= wall.length or door.offset in offsets or door.id in ids:
+                raise StructureError("Remove the door before trimming that wall edge.")
+            offsets.add(door.offset)
+            ids.add(door.id)
+            if any(
+                door.id == other.id
+                for existing in self.structures.values()
+                if existing.id != exclude_id
+                for other in existing.doors
+            ):
+                raise StructureError("Door identity is already in use.")
+            if door.unlockMode == "keypad" and not door.hasPin:
+                raise StructureError("A keypad door needs a PIN verifier.")
+            if door.isLocked and (not door.hasPin or door.unlockMode != "keypad"):
+                raise StructureError("A door needs a keypad PIN before it can lock.")
+            line = wall.startY if wall.orientation == "horizontal" else wall.startX
+            if line <= 0 or line >= self.grid_size:
+                raise StructureError("A door needs walkable tiles on both sides.")
         for edge in self.wall_edges(wall):
             existing = self._edges.get(edge)
             if existing is not None and existing != exclude_id:
@@ -391,4 +440,43 @@ class StructureService:
         """Resolve a canonical edge key to its wall, if present."""
 
         structure_id = self._edges.get(edge)
-        return self.structures.get(structure_id) if structure_id else None
+        wall = self.structures.get(structure_id) if structure_id else None
+        if wall is None:
+            return None
+        offset = (
+            edge[2] - wall.startX
+            if wall.orientation == "horizontal"
+            else edge[3] - wall.startY
+        )
+        door = next((door for door in wall.doors if door.offset == offset), None)
+        if door is None:
+            return wall
+        return wall.model_copy(
+            update={
+                "movementBlocked": not door.isOpen,
+                "contactSound": "",
+                "title": door.title,
+                "soundTransmission": 1.0 if door.isOpen else 0.15,
+                "occlusionLowpassHz": 20_000 if door.isOpen else 1200,
+            }
+        )
+
+    def validate_doors(self, wall: WallStructure) -> None:
+        """Validate a complete wall after an atomic door edit."""
+
+        self._validate_wall(wall, exclude_id=wall.id)
+
+    @staticmethod
+    def door_side(wall: WallStructure, door: WallDoor, client: ClientConnection) -> str:
+        """Resolve the approach side, rejecting nonadjacent players."""
+
+        x = wall.startX + (door.offset if wall.orientation == "horizontal" else 0)
+        y = wall.startY + (door.offset if wall.orientation == "vertical" else 0)
+        if client.z != wall.floorZ or client.elevator_id is not None:
+            raise StructureError("Stand beside the door to use it.")
+        negative = (x, y - 1) if wall.orientation == "horizontal" else (x - 1, y)
+        if (client.x, client.y) == negative:
+            return "negative"
+        if (client.x, client.y) == (x, y):
+            return "positive"
+        raise StructureError("Stand beside the door to use it.")

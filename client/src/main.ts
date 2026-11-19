@@ -37,6 +37,8 @@ import { resolveMainModeCommand, type MainModeCommand } from './input/mainComman
 import { dispatchModeInput } from './input/modeDispatcher';
 import { handleListControlKey } from './input/listController';
 import { createAdminController, type AdminMenuAction } from './input/adminController';
+import { createDoorControls } from './input/doorControls';
+import { adjacentDoors } from './state/structureGeometry';
 import { createWorldBuilderController } from './input/worldBuilderController';
 import { setupKeyboardInputHandlers } from './input/keyboardController';
 import {
@@ -649,7 +651,17 @@ const confirmationController = createConfirmationController({
   blip: () => audio.sfxUiBlip(),
   cancel: () => audio.sfxUiCancel(),
 });
+const doorControls = createDoorControls({
+  send: (message) => signaling.send(message),
+  choose: (request) => optionSelector.open(request),
+  confirm: (request) => confirmationController.open(request),
+  status: updateStatus, normal: () => { state.mode = 'normal'; },
+  focusGrid: () => dom.canvas.focus(), gridSize: () => worldGridSize,
+  cue: (success) => success ? audio.sfxUiConfirm() : audio.sfxUiCancel(),
+  keypadSound: (name) => audio.playSample(resolveIncomingSoundUrl(`/sounds/${name}.ogg`), 1, 0, true),
+});
 const worldBuilderController = createWorldBuilderController({
+  editDoors: doorControls.edit,
   state,
   hasPermission: (key) => authController.hasPermission(key),
   send: (message) => signaling.send(message),
@@ -1635,6 +1647,7 @@ async function reconnectAfterSocketClose(): Promise<void> {
 /** Reconnects after disconnect with delay and bounded retry attempts. */
 async function reconnectWithRetry(reason: 'heartbeat' | 'socketClose'): Promise<void> {
   if (reconnectInFlight || !state.running) return;
+  doorControls.close();
   // Tear down the interrupted session before starting a cancellable retry sequence.
   disconnect();
   const controller = new AbortController();
@@ -1786,6 +1799,7 @@ function getConnectionFlowDeps(): ConnectFlowDeps {
 /** Performs end-to-end connect flow: validation, media setup, then signaling connection. */
 async function connect(): Promise<void> {
   if (state.running) return;
+  doorControls.close();
   cancelReconnect();
   connectionAbort?.abort();
   await connectAttempt(new AbortController());
@@ -1911,6 +1925,7 @@ const onAppMessage = createOnMessageHandler({
   handleAdminActionResult,
   handleItemTransferTargets,
   handleItemHandTargets,
+  handleDoorResult: doorControls.result,
   handleStructureActionResult: (message) => worldBuilderController.handleActionResult(message),
   handleRegionActionResult: (message) => worldBuilderController.handleRegionActionResult(message),
   handleAmbianceActionResult: (message) => worldBuilderController.handleAmbianceActionResult(message),
@@ -2146,7 +2161,41 @@ function openWorldBuilderCommand(): void {
   worldBuilderController.open();
 }
 
+function localDoors() {
+  if (state.elevatorItemId) return [];
+  return adjacentDoors(state.structures.values(), state.player.x, state.player.y, state.player.z);
+}
+
+function chooseDoorOrItem(secondary: boolean): boolean {
+  const doors = localDoors().filter(({door}) => !secondary || door.unlockMode === 'keypad');
+  if (!doors.length) return false;
+  const items = getUsableInteractionItems();
+  if (doors.length === 1 && items.length === 0) {
+    doorControls.use(doors[0], secondary);
+    return true;
+  }
+  const options = [
+    ...doors.map(({door, direction}) => ({id:'door/' + door.id, label:
+      (secondary ? (door.isLocked ? 'Unlock ' : 'Lock ') : '') + door.title + ', ' + direction})),
+    ...items.map(item => ({id:'item/' + item.id, label:itemLabel(item)})),
+  ];
+  optionSelector.open({title:secondary ? 'Secondary action' : 'Use', options,
+    onCancel:() => { state.mode = 'normal'; },
+    onSelect(id) {
+      state.mode = 'normal';
+      const target = doors.find(d => 'door/' + d.door.id === id);
+      if (target) { doorControls.use(target, secondary); return; }
+      const item = items.find(candidate => 'item/' + candidate.id === id);
+      if (item) {
+        if (secondary) secondaryUseItem(item);
+        else useItem(item);
+      }
+    }});
+  return true;
+}
+
 function useItemCommand(): void {
+  if (chooseDoorOrItem(false)) return;
   const usable = getUsableInteractionItems();
   if (usable.length === 0) {
     updateStatus('No usable items here.');
@@ -2161,6 +2210,7 @@ function useItemCommand(): void {
 }
 
 function secondaryUseItemCommand(): void {
+  if (chooseDoorOrItem(true)) return;
   const usable = getUsableInteractionItems();
   if (usable.length === 0) {
     updateStatus('No usable items here.');
@@ -2431,6 +2481,8 @@ function getAvailableCommandPaletteEntriesForMode(mode: GameMode): Array<Command
       hasCarriedItem: getCarriedItems(state.items.values(), state.player.id).length > 0,
       squareItemCount: getCurrentSquareItems().length,
       usableItemCount: getUsableInteractionItems().length,
+      nearbyDoorCount: localDoors().length,
+      nearbyKeypad: localDoors().some(({door}) => door.unlockMode === 'keypad'),
       manageableItemCount: getManageableInteractionItems().length,
       hasEditableItemTarget: canEditCurrentItem(),
       hasInspectableItemTarget: canInspectCurrentItem(),

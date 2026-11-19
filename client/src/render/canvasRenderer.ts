@@ -48,17 +48,18 @@ export class CanvasRenderer {
     ctx.lineWidth = Math.max(2, this.squarePixelSize * 0.12);
     for (const wall of state.structures.values()) {
       if (wall.floorZ !== state.player.z) continue;
-      ctx.beginPath();
-      if (wall.orientation === 'horizontal') {
-        const canvasY = this.canvas.height - wall.startY * this.squarePixelSize;
-        ctx.moveTo(wall.startX * this.squarePixelSize, canvasY);
-        ctx.lineTo((wall.startX + wall.length) * this.squarePixelSize, canvasY);
-      } else {
-        const canvasX = wall.startX * this.squarePixelSize;
-        ctx.moveTo(canvasX, this.canvas.height - wall.startY * this.squarePixelSize);
-        ctx.lineTo(canvasX, this.canvas.height - (wall.startY + wall.length) * this.squarePixelSize);
+      const horizontal = wall.orientation === 'horizontal';
+      for (let offset = 0; offset < wall.length; offset++) {
+        const door = wall.doors?.find((entry) => entry.offset === offset);
+        ctx.strokeStyle = door ? (door.isOpen ? '#34d399' : '#f59e0b') : '#f3f4f6';
+        const x = (wall.startX + (horizontal ? offset : 0)) * this.squarePixelSize;
+        const y = this.canvas.height - (wall.startY + (horizontal ? 0 : offset)) * this.squarePixelSize;
+        const span = this.squarePixelSize * (door?.isOpen ? 0.22 : 1);
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + (horizontal ? span : 0), y - (horizontal ? 0 : span));
+        ctx.stroke();
       }
-      ctx.stroke();
     }
     ctx.lineWidth = 1;
 

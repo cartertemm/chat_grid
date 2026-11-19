@@ -274,6 +274,36 @@ class StructureDeletePacket(BasePacket):
     structureId: str
 
 
+class DoorActionPacket(BasePacket):
+    """Edit or operate one wall-attached door; secrets are never reflected."""
+
+    type: Literal["door_action"]
+    structureId: str
+    doorId: str | None = None
+    action: Literal[
+        "add",
+        "update",
+        "remove",
+        "open",
+        "close",
+        "lock",
+        "unlock",
+        "keypad_begin",
+        "keypad_digit",
+        "keypad_cancel",
+    ]
+    offset: StrictInt | None = Field(default=None, ge=0)
+    title: str | None = Field(default=None, min_length=1, max_length=80)
+    unlockMode: Literal["none", "keypad"] | None = None
+    keypadSides: Literal["both", "negative", "positive"] | None = None
+    pinRequiredFor: Literal["unlock", "lock", "both"] | None = None
+    unlockTimeoutSeconds: StrictInt | None = Field(default=None, ge=0, le=300)
+    pin: str | None = Field(default=None, max_length=4, repr=False)
+    digit: str | None = Field(default=None, max_length=1, repr=False)
+    keypadAction: Literal["lock", "unlock"] | None = None
+    revision: StrictInt | None = Field(default=None, ge=0)
+
+
 class AmbianceAddPacket(BasePacket):
     """Request one default one-cell ambiance at the caller's position."""
 
@@ -398,6 +428,7 @@ ClientPacket = (
     | StructureRotateWallPacket
     | StructureUpdateWallPacket
     | StructureDeletePacket
+    | DoorActionPacket
     | AmbianceAddPacket
     | AmbianceUpdatePacket
     | AmbianceResizePacket
@@ -594,6 +625,23 @@ class ItemRemovePacket(BasePacket):
     itemId: str
 
 
+class WallDoor(BaseModel):
+    """Client-safe authored properties and current state of one doorway."""
+
+    id: str
+    offset: StrictInt = Field(ge=0)
+    title: str = Field(default="Door", min_length=1, max_length=80)
+    isOpen: bool = False
+    isLocked: bool = False
+    unlockMode: Literal["none", "keypad"] = "none"
+    keypadSides: Literal["both", "negative", "positive"] = "both"
+    pinRequiredFor: Literal["unlock", "lock", "both"] = "unlock"
+    unlockTimeoutSeconds: StrictInt = Field(default=0, ge=0, le=300)
+    unlockDeadlineMs: StrictInt | None = None
+    hasPin: bool = False
+    revision: StrictInt = Field(default=0, ge=0)
+
+
 class WallStructure(BaseModel):
     """One editable wall run stored separately from world items."""
 
@@ -610,6 +658,7 @@ class WallStructure(BaseModel):
     height: int = Field(default=40, ge=0)
     preset: str = Field(default="solid", min_length=1, max_length=40)
     contactSound: str = "/sounds/wall.ogg"
+    doors: list[WallDoor] = Field(default_factory=list)
 
 
 class AmbianceRegion(BaseModel):
@@ -659,6 +708,19 @@ class StructureRemovePacket(BasePacket):
 
     type: Literal["structure_remove"]
     structureId: str
+
+
+class DoorActionResultPacket(BasePacket):
+    """Report an operation or an exclusive, transient keypad session."""
+
+    type: Literal["door_action_result"]
+    ok: bool
+    action: str
+    message: str
+    structureId: str
+    doorId: str | None = None
+    keypadActive: bool = False
+    keypadAction: Literal["lock", "unlock"] | None = None
 
 
 class StructureActionResultPacket(BasePacket):
