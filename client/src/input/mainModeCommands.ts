@@ -13,6 +13,8 @@ export type MainModeCommandAvailabilityContext = {
   hasCarriedItem: boolean;
   squareItemCount: number;
   usableItemCount: number;
+  nearbyDoorCount?: number;
+  nearbyKeypad?: boolean;
   manageableItemCount: number;
   hasEditableItemTarget: boolean;
   hasInspectableItemTarget: boolean;
@@ -185,19 +187,19 @@ const MAIN_MODE_COMMANDS: MainModeCommandDescriptor[] = [
   },
   {
     id: 'useItem',
-    label: 'Use item',
+    label: 'Use item or door',
     shortcut: 'Enter',
-    tooltip: 'Use item.',
+    tooltip: 'Use an item or adjacent door.',
     section: 'Items',
-    isAvailable: (context) => context.usableItemCount > 0,
+    isAvailable: (context) => context.usableItemCount > 0 || !!context.nearbyDoorCount,
   },
   {
     id: 'secondaryUseItem',
-    label: 'Secondary item action',
+    label: 'Secondary item action or door lock',
     shortcut: 'Shift+Enter',
     tooltip: 'Secondary item action.',
     section: 'Items',
-    isAvailable: (context) => context.usableItemCount > 0,
+    isAvailable: (context) => context.usableItemCount > 0 || !!context.nearbyKeypad,
   },
   {
     id: 'speakUsers',

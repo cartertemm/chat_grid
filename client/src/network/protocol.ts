@@ -57,7 +57,22 @@ export const ambianceRegionSchema = z.object({
 
 export const ambianceTypeSchema = z.object({ id: z.string(), title: z.string(), url: z.string() });
 
+const doorOperation = z.enum(['add','update','remove','open','close','lock','unlock','keypad_begin','keypad_digit','keypad_cancel']);
+export const doorSchema = z.object({
+  id: z.string(), offset: z.number().int().nonnegative(), title: z.string(),
+  isOpen: z.boolean(), isLocked: z.boolean(), hasPin: z.boolean(),
+  unlockMode: z.enum(['none','keypad']), keypadSides: z.enum(['negative','positive','both']),
+  pinRequiredFor: z.enum(['unlock','lock','both']), unlockTimeoutSeconds: z.number().int().min(0).max(300),
+  revision: z.number().int(), unlockDeadlineMs: z.number().nullable().optional(),
+});
+const doorResultSchema = z.object({
+  type: z.literal('door_action_result'), ok: z.boolean(), action: doorOperation, message: z.string(),
+  structureId: z.string(), doorId: z.string().nullish(), keypadActive: z.boolean().nullish(),
+  keypadAction: z.enum(['lock','unlock']).nullish(),
+});
+
 export const wallStructureSchema = z.object({
+  doors: z.array(doorSchema).optional(),
   id: z.string(),
   floorZ: z.number().int(),
   startX: z.number().int(),
@@ -542,6 +557,7 @@ export const incomingMessageSchema = z.discriminatedUnion('type', [
   adminRolesListSchema,
   adminUsersListSchema,
   adminActionResultSchema,
+  doorResultSchema,
   structureUpsertSchema,
   structureRemoveSchema,
   structureActionResultSchema,
@@ -553,7 +569,14 @@ export const incomingMessageSchema = z.discriminatedUnion('type', [
 
 export type IncomingMessage = z.infer<typeof incomingMessageSchema>;
 
+export type DoorAction = {
+  type: 'door_action'; structureId: string; action: z.infer<typeof doorOperation>;
+  doorId?: string; revision?: number; offset?: number; title?: string; pin?: string; digit?: string;
+  unlockMode?: 'none' | 'keypad'; keypadSides?: 'negative' | 'positive' | 'both';
+  pinRequiredFor?: 'lock' | 'unlock' | 'both'; unlockTimeoutSeconds?: number;
+};
 export type OutgoingMessage =
+  | DoorAction
   | { type: 'auth_register'; username: string; password: string; email?: string }
   | { type: 'auth_login'; username: string; password: string }
   | { type: 'auth_resume'; sessionToken: string }

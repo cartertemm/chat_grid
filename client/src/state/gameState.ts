@@ -41,7 +41,10 @@ export type AmbianceRegion = {
 
 export type AmbianceType = { id: string; title: string; url: string };
 
+export type WallDoor = import('zod').infer<typeof import('../network/protocol').doorSchema>;
+
 export type WallStructure = {
+  doors?: WallDoor[];
   id: string;
   floorZ: number;
   startX: number;
@@ -57,7 +60,7 @@ export type WallStructure = {
   contactSound: string;
 };
 
-export type StructurePreset = Omit<WallStructure, 'id' | 'floorZ' | 'startX' | 'startY' | 'orientation' | 'length' | 'preset'> & {
+export type StructurePreset = Omit<WallStructure, 'id' | 'floorZ' | 'startX' | 'startY' | 'orientation' | 'length' | 'preset' | 'doors'> & {
   id: string;
 };
 

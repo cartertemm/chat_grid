@@ -54,6 +54,12 @@ This document is the authoritative keymap for the client.
 - `Shift+Enter`: Secondary item action
 - For an elevator, `Enter` calls or starts opening it, enters or exits only after the door is fully open, and has no boarding effect while the door is opening or closing.
 
+### Wall doors
+
+- Press Enter (touch Use) beside a door to open or close it. When a door shares a square with a usable item, choose the target. C includes each adjacent door's direction and state.
+- From a keypad-protected side, Enter at a locked door requests unlock. If a PIN is required, enter four digits in the masked field. The fourth digit submits. After a successful unlock the door is still closed and anyone can open it with Enter. The free side of a one-sided door can open without a PIN.
+- Shift+Enter (or the secondary action under Commands) requests manual Lock or Unlock. Closing an unlocked door leaves it unlocked. Only one person can enter digits on a door at once. Cancel or ten seconds without input releases the keypad.
+
 ### World Builder
 
 - `W`: Open World Builder when the account has `world.structure.edit`.
@@ -66,6 +72,8 @@ This document is the authoritative keymap for the client.
 - `Edit properties`: Change sound transmission (`0..1`), occlusion low-pass (`20..20000` hertz), or the contact-sound URL.
 - On transmission or low-pass, `ArrowLeft`/`ArrowRight` changes one numeric step and `PageDown`/`PageUp` changes ten steps. Inside the numeric editor, use `ArrowDown`/`ArrowUp` and the corresponding page keys.
 - `Space`: Read specific help for the selected World Builder action, preset, direction, or wall. Property help uses shared metadata to report its type, options or numeric range, and editability.
+- Edit walls > select wall > Doors lists its attached doors. Add door selects an unused unit edge by number and coordinates. A wall can have multiple doors. Sliding and rotating moves them with the wall. Remove a door before trimming away its edge.
+- Door settings offers a name and unlock mode. Keypad mode adds a four-digit PIN, keypad side(s), Require PIN for (Unlock by default, Lock, or Both), and an unlock timeout of 0 to 300 seconds. Zero keeps the door unlocked until manually locked. Expiry arms the lock even if the door is open; passage remains possible until it closes.
 - Walls are edited live. Other connected clients receive and render changes immediately.
 - Wall deletion uses the same default-No confirmation flow as item deletion; confirmation choices do not have tooltips.
 - Brick, glass, and fence walls block movement. Curtains may be crossed; wall impacts and curtain crossings play the structure's contact sound locally and spatially for nearby users.

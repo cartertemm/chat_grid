@@ -1,4 +1,4 @@
-import type { WallStructure } from './gameState';
+import type { WallDoor, WallStructure } from './gameState';
 
 export type WallEdgeIndex = ReadonlyMap<string, WallStructure>;
 export type WallAcousticMix = { gain: number; lowpassHz: number };
@@ -35,7 +35,12 @@ export function buildWallEdgeIndex(structures: Iterable<WallStructure>): WallEdg
     for (let offset = 0; offset < wall.length; offset += 1) {
       const lineX = wall.startX + (wall.orientation === 'horizontal' ? offset : 0);
       const lineY = wall.startY + (wall.orientation === 'vertical' ? offset : 0);
-      index.set(edgeKey(wall.floorZ, wall.orientation, lineX, lineY), wall);
+      const door = wall.doors?.find((candidate) => candidate.offset === offset);
+      if (door?.isOpen) continue;
+      const effectiveWall = door
+        ? { ...wall, title: door.title, movementBlocked: true, soundTransmission: 0.15, occlusionLowpassHz: 1200 }
+        : wall;
+      index.set(edgeKey(wall.floorZ, wall.orientation, lineX, lineY), effectiveWall);
     }
   }
   return index;
@@ -232,6 +237,26 @@ export function nearbyWalls(
     .sort((left, right) => wallDistance(left, x, y) - wallDistance(right, x, y));
 }
 
+export type NearbyDoor = { wall: WallStructure; door: WallDoor; direction: string; freeSide: boolean };
+
+export function adjacentDoors(structures: Iterable<WallStructure>, x: number, y: number, z: number): NearbyDoor[] {
+  const result: NearbyDoor[] = [];
+  for (const wall of structures) {
+    if (wall.floorZ !== z || !wall.doors?.length) continue;
+    const horizontal = wall.orientation === 'horizontal';
+    const offset = horizontal ? x - wall.startX : y - wall.startY;
+    const across = horizontal ? y - wall.startY : x - wall.startX;
+    if (across !== 0 && across !== -1) continue;
+    const door = wall.doors.find((entry) => entry.offset === offset);
+    if (!door) continue;
+    const positive = across === 0;
+    const direction = horizontal ? (positive ? 'south' : 'north') : (positive ? 'west' : 'east');
+    const side = positive ? 'positive' : 'negative';
+    result.push({ wall, door, direction, freeSide: door.keypadSides !== 'both' && door.keypadSides !== side });
+  }
+  return result;
+}
+
 /** Describe structures on the four edges surrounding one cell. */
 export function adjacentWallDescriptions(
   structures: Iterable<WallStructure>,
@@ -246,7 +271,11 @@ export function adjacentWallDescriptions(
     ['east', 'vertical', x + 1, y],
     ['west', 'vertical', x, y],
   ];
+  const doors = adjacentDoors(walls, x, y, floorZ);
   return edges.flatMap(([direction, orientation, lineX, lineY]) => {
+    const nearby = doors.find((entry) => entry.direction === direction);
+    if (nearby) return [[nearby.door.title, direction, nearby.door.isOpen ? 'open' : 'closed',
+      nearby.door.isLocked ? 'locked' : 'unlocked'].join(', ')];
     const wall = walls.find((candidate) => wallContainsEdge(candidate, orientation, lineX, lineY));
     return wall ? [`${wall.title} ${direction}`] : [];
   });

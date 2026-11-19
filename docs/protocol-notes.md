@@ -213,3 +213,9 @@ This is a behavior guide for packet semantics beyond raw schemas.
 - `ambiance_delete` carries `ambianceId`.
 - Every mutation requires `world.structure.edit`. Bounds, minimum area, sound selection, and numeric/name validation are server-owned. Overlap is allowed.
 - Accepted mutations broadcast `ambiance_upsert` with the complete `ambiance`, or `ambiance_remove` with `ambianceId`, before sending the caller `ambiance_action_result` (`ok`, `action`, `message`, optional `ambianceId`).
+
+## Wall doors
+
+A wall carries its doors as offsets from the run start. Welcome and structure upserts include public door state, configuration and revisions. The server persists private lock verification data with the structures dataset. Public packets omit credential material.
+
+Clients request explicit add, edit, remove, open, close, lock and unlock operations with `door_action`. The server validates the wall, edge, player position, permissions and current state. A `door_action_result` can prompt the caller for an exclusive keypad session. Each digit is sent privately as `keypad_digit`; cancellation uses `keypad_cancel`. The server owns both the keypad inactivity limit and any automatic relock deadline. Unlocking changes lock state independently of movement and closing. Use ordinary structure upserts to update crossing, rendering and acoustic state for everyone.
