@@ -7,7 +7,8 @@ export type MobileTextEntry = {
   label: string;
   value: string;
   maxLength: number;
-  inputMode: 'text' | 'decimal';
+  inputMode: 'text' | 'decimal' | 'numeric';
+  secret?: boolean;
   submitLabel: string;
 };
 
@@ -77,6 +78,7 @@ export function setupMobileControls(deps: MobileControllerDeps): MobileControlle
   const coarsePointer = window.matchMedia('(hover: none), (pointer: coarse)').matches;
   let enabled = deps.loadEnabled() ?? coarsePointer;
   let expanded = deps.loadExpanded();
+  let renderedTextLabel = '';
   let renderedTextMode: GameMode | null = null;
   let renderedSnapshot = '';
   const activeDirections = new Map<number, DirectionCode>();
@@ -142,17 +144,23 @@ export function setupMobileControls(deps: MobileControllerDeps): MobileControlle
     deps.dom.textForm.classList.toggle('hidden', config === null);
     if (!config) {
       renderedTextMode = null;
+      renderedTextLabel = '';
+      deps.dom.textInput.value = '';
+      deps.dom.textInput.type = 'text';
       return false;
     }
 
     const mode = deps.getMode();
     deps.dom.textLabel.textContent = config.label;
+    deps.dom.textInput.type = config.secret ? 'password' : 'text';
+    deps.dom.textInput.autocomplete = config.secret ? 'off' : 'on';
     deps.dom.textInput.maxLength = config.maxLength;
     deps.dom.textInput.inputMode = config.inputMode;
     deps.dom.textInput.enterKeyHint = config.submitLabel === 'Send' ? 'send' : 'done';
     deps.dom.textSubmit.textContent = config.submitLabel;
-    if (renderedTextMode !== mode) {
+    if (renderedTextMode !== mode || renderedTextLabel !== config.label) {
       renderedTextMode = mode;
+      renderedTextLabel = config.label;
       deps.dom.textInput.value = config.value;
       requestAnimationFrame(() => {
         deps.dom.textInput.focus({ preventScroll: true });

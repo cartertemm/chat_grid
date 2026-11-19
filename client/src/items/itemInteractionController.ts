@@ -81,7 +81,6 @@ export function createItemInteractionController(deps: ItemControllerDeps): {
   beginItemProperties: (item: WorldItem, showAll?: boolean) => void;
   recomputeActiveItemPropertyKeys: (itemId: string) => void;
   getManagementOptions: (item: WorldItem) => ItemManagementOption[];
-  handleDuplicateResult: (message: Extract<IncomingMessage, { type: 'item_action_result' }>) => boolean;
   handleItemTransferTargets: (message: Extract<IncomingMessage, { type: 'item_transfer_targets' }>) => void;
   handleItemHandTargets: (message: Extract<IncomingMessage, { type: 'item_hand_targets' }>) => void;
   handleSelectItemModeInput: (code: string, key: string) => void;
@@ -94,7 +93,6 @@ export function createItemInteractionController(deps: ItemControllerDeps): {
   let itemManagementTargetUserIndex = 0;
   let itemManagementTransferTargets: ItemTransferTarget[] = [];
   let itemManagementTargetAction: ItemManagementTargetAction | null = null;
-  let duplicateRequested = false;
   let itemPropertiesShowAll = false;
 
   function canManageDeleteItem(item: WorldItem): boolean {
@@ -413,7 +411,6 @@ export function createItemInteractionController(deps: ItemControllerDeps): {
     if (control.type === 'select') {
       const option = itemManagementOptions[itemManagementOptionIndex];
       if (option.action === 'duplicate') {
-        duplicateRequested = true;
         deps.state.mode = 'normal';
         deps.signalingSend({ type: 'item_duplicate', itemId: item.id });
         resetItemManagementState();
@@ -511,21 +508,7 @@ export function createItemInteractionController(deps: ItemControllerDeps): {
   }
 
   return {
-    handleDuplicateResult(message) {
-      if (message.action !== 'duplicate' || !duplicateRequested) return false;
-      duplicateRequested = false;
-      const copy = message.itemId ? deps.state.items.get(message.itemId) : undefined;
-      if (!message.ok || !copy || deps.state.mode !== 'normal') return false;
-      beginItemProperties(copy);
-      const key = deps.state.itemPropertyKeys[0];
-      const property = key ? ` ${deps.itemPropertyLabel(key)}: ${deps.getItemPropertyValue(copy, key)}` : '';
-      deps.updateStatus(`${message.message} New copy selected.${property}`);
-      return true;
-    },
-    reset() {
-      duplicateRequested = false;
-      resetItemManagementState();
-    },
+    reset: resetItemManagementState,
     beginItemSelection,
     beginItemManagement,
     beginItemProperties,

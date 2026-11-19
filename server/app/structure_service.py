@@ -456,8 +456,10 @@ class StructureService:
                 "movementBlocked": not door.isOpen,
                 "contactSound": "",
                 "title": door.title,
-                "soundTransmission": 1.0 if door.isOpen else 0.15,
-                "occlusionLowpassHz": 20_000 if door.isOpen else 1200,
+                "soundTransmission": 1.0 if door.isOpen else wall.soundTransmission,
+                "occlusionLowpassHz": 20_000
+                if door.isOpen
+                else wall.occlusionLowpassHz,
             }
         )
 

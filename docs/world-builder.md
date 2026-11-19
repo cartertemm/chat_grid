@@ -1,6 +1,6 @@
 # World Builder And Structures
 
-World Builder edits server-authoritative world geometry separately from runtime items. The first structure type is a wall run. Doors and authored platforms remain later work.
+World Builder edits server-authoritative world geometry separately from runtime items. A wall run can contain doors along individual edges. A closed door inherits the current sound transmission and low-pass cutoff of its parent wall, including custom values. An open door allows sound through its edge. Both adjacent sides hear the opening and closing cues.
 
 ## Wall Runs
 

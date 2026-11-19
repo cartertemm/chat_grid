@@ -5,23 +5,25 @@ import { createWorldBuilderController } from './worldBuilderController';
 function setup() {
   const state = createInitialState();
   const send = vi.fn();
+  const updateStatus = vi.fn();
   const openConfirmation = vi.fn();
   const controller = createWorldBuilderController({
     state, send, hasPermission: () => true, openConfirmation,
-    updateStatus: vi.fn(), announceMenuEntry: vi.fn(), blip: vi.fn(), confirm: vi.fn(), cancel: vi.fn(),
+    updateStatus, announceMenuEntry: vi.fn(), blip: vi.fn(), confirm: vi.fn(), cancel: vi.fn(),
     applyTextInputEdit: vi.fn(), setReplaceTextOnNextType: vi.fn(), openOptionSelector: vi.fn(),
   });
   controller.open();
-  controller.handleRoot('KeyR', 'r');
-  controller.handleRoot('Enter', 'Enter');
-  expect(state.mode).toBe('worldBuilderRegionRoot');
-  return { controller, state, send, openConfirmation };
+  return { controller, state, send, openConfirmation, updateStatus };
 }
 
 describe('named region builder', () => {
   it('creates, renames and adjusts canonical geometry through the existing builder', () => {
-    const { controller, state, send } = setup();
-    controller.handleRegionRoot('Enter', 'Enter');
+    const { controller, state, send, updateStatus } = setup();
+    controller.handleRoot('KeyA', 'a');
+    expect(updateStatus).toHaveBeenLastCalledWith('Add ambiance');
+    controller.handleRoot('KeyA', 'a');
+    expect(updateStatus).toHaveBeenLastCalledWith('Add region');
+    controller.handleRoot('Enter', 'Enter');
     expect(send).toHaveBeenLastCalledWith({ type: 'region_add' });
     const region: NamedRegion = { id: 'new', name: 'Region', floorZ: 0, startX: 1, startY: 1, endX: 1, endY: 1 };
     state.regions.set(region.id, region);
@@ -48,7 +50,7 @@ describe('named region builder', () => {
     expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'region_delete' }));
     state.regions.delete(region.id);
     openConfirmation.mock.calls[0][0].onConfirm();
-    expect(state.mode).toBe('worldBuilderRegionRoot');
+    expect(state.mode).toBe('worldBuilder');
     expect(send).not.toHaveBeenCalled();
   });
 });

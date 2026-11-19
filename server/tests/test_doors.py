@@ -101,6 +101,78 @@ async def test_shared_unlock_does_not_move_door(door_world):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("orientation", ["horizontal", "vertical"])
+async def test_door_sound_describes_both_sides_and_inherits_wall_acoustics(
+    door_world, orientation
+):
+    world, owner, guest, wall_id = door_world
+    service = world.server.structure_service
+    if orientation == "vertical":
+        service.rotate_wall(wall_id, orientation="vertical")
+        owner.x, owner.y = 3, 5
+        guest.x, guest.y = 4, 5
+    door_id = await add(door_world)
+    for transmission, cutoff in [(0.0, 800), (0.6, 2200)]:
+        service.update_wall(
+            wall_id,
+            preset_id=None,
+            sound_transmission=transmission,
+            occlusion_lowpass_hz=cutoff,
+            contact_sound=None,
+        )
+        crossed = service.walls_crossed_for_move(
+            x=owner.x,
+            y=owner.y,
+            z=0,
+            next_x=guest.x,
+            next_y=guest.y,
+        )
+        assert len(crossed) == 1
+        assert crossed[0].soundTransmission == transmission
+        assert crossed[0].occlusionLowpassHz == cutoff
+    for operation in ("open", "close"):
+        world.transport.clear()
+        assert (await action(world, guest, wall_id, operation, doorId=door_id)).ok
+        source = world.transport.last_packet_of_type(owner, WorldSoundPacket)
+        assert source == world.transport.last_packet_of_type(guest, WorldSoundPacket)
+        assert source.doorOrientation == orientation
+        assert (source.x, source.y, source.z) == (4, 5, 0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("initially_open", [False, True])
+async def test_enabling_keypad_arms_existing_door_without_moving_it(
+    door_world, initially_open
+):
+    world, owner, guest, wall_id = door_world
+    door_id = await add(door_world)
+    if initially_open:
+        assert (await action(world, owner, wall_id, "open", doorId=door_id)).ok
+    world.transport.clear()
+    result = await action(
+        world,
+        owner,
+        wall_id,
+        "update",
+        doorId=door_id,
+        pin="0042",
+        unlockMode="keypad",
+        pinRequiredFor="unlock",
+        keypadSides="negative",
+    )
+    assert result.ok
+    current = door(world, wall_id, door_id)
+    assert current.isLocked and current.isOpen == initially_open
+    assert world.transport.packets_of_type(owner, WorldSoundPacket) == []
+    if initially_open:
+        assert (await action(world, guest, wall_id, "close", doorId=door_id)).ok
+    assert (await action(world, owner, wall_id, "open", doorId=door_id)).keypadActive
+    await action(world, owner, wall_id, "keypad_cancel", doorId=door_id)
+    assert (await action(world, guest, wall_id, "open", doorId=door_id)).ok
+    assert door(world, wall_id, door_id).isLocked
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("policy", ["unlock", "lock", "both"])
 async def test_pin_requirement_for_each_manual_operation(door_world, policy):
     world, owner, _, wall_id = door_world

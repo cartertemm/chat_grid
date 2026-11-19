@@ -18,6 +18,9 @@ function setupRemoteMovement() {
   });
   const playWorldSound = vi.fn();
   const updateStatus = vi.fn();
+  const pushChatMessage = vi.fn();
+  const audioUiConfirm = vi.fn();
+  const audioUiCancel = vi.fn();
   const peerManager = {
     ensurePeer: vi.fn(),
     setPeerPosition: vi.fn(),
@@ -29,6 +32,9 @@ function setupRemoteMovement() {
     randomFootstepUrl: () => '/sounds/step-1.ogg',
     playWorldSound,
     updateStatus,
+    pushChatMessage,
+    audioUiConfirm,
+    audioUiCancel,
   };
   const deps = new Proxy(provided, {
     get(target, property, receiver) {
@@ -40,9 +46,41 @@ function setupRemoteMovement() {
     handler: createOnMessageHandler(deps),
     playWorldSound,
     updateStatus,
+    pushChatMessage,
+    audioUiConfirm,
+    audioUiCancel,
     state,
   };
 }
+
+describe('item duplication results', () => {
+  it('announces success once through the usual message flow and stays in normal mode', async () => {
+    const { handler, pushChatMessage, audioUiConfirm, audioUiCancel, state } = setupRemoteMovement();
+    const message = 'You duplicated Piano (piano) here.';
+
+    await handler({ type: 'item_action_result', action: 'duplicate', ok: true, itemId: 'copy', message });
+
+    expect(pushChatMessage).toHaveBeenCalledOnce();
+    expect(pushChatMessage).toHaveBeenCalledWith(message);
+    expect(audioUiConfirm).toHaveBeenCalledOnce();
+    expect(audioUiCancel).not.toHaveBeenCalled();
+    expect(state.mode).toBe('normal');
+    expect(state.selectedItemId).toBeNull();
+  });
+
+  it('announces duplication failure through the usual error flow', async () => {
+    const { handler, pushChatMessage, audioUiConfirm, audioUiCancel, state } = setupRemoteMovement();
+    const message = 'You already own the maximum of 500 items.';
+
+    await handler({ type: 'item_action_result', action: 'duplicate', ok: false, message });
+
+    expect(pushChatMessage).toHaveBeenCalledOnce();
+    expect(pushChatMessage).toHaveBeenCalledWith(message);
+    expect(audioUiCancel).toHaveBeenCalledOnce();
+    expect(audioUiConfirm).not.toHaveBeenCalled();
+    expect(state.mode).toBe('normal');
+  });
+});
 
 describe('local facing announcements', () => {
   it('announces a confirmed local facing change as the compass direction', async () => {

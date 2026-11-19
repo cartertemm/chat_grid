@@ -42,6 +42,7 @@ function setupHarness() {
   let mode: GameMode = 'normal';
   let muted = false;
   let textValue = '';
+  let customTextEntry: MobileTextEntry | null = null;
   const dispatched: string[] = [];
   const savedEnabled: boolean[] = [];
   const savedExpanded: boolean[] = [];
@@ -101,7 +102,7 @@ function setupHarness() {
       muted = !muted;
     },
     getTextEntry: (): MobileTextEntry | null =>
-      mode === 'chat'
+      mode === 'doorSettingsEdit' ? customTextEntry : mode === 'chat'
         ? { label: 'Chat message', value: textValue, maxLength: 500, inputMode: 'text', submitLabel: 'Send' }
         : null,
     setTextEntry: (value) => {
@@ -123,6 +124,7 @@ function setupHarness() {
       mode = value;
     },
     getTextValue: () => textValue,
+    setCustomTextEntry: (value: MobileTextEntry) => { customTextEntry = value; },
   };
 }
 
@@ -151,6 +153,28 @@ describe('mobile controls', () => {
     element<HTMLFormElement>('textForm').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     expect(harness.dispatched).toContain('Enter');
     expect(harness.getMode()).toBe('normal');
+    expect(element('textForm').classList.contains('hidden')).toBe(true);
+  });
+
+  it('masks PIN entry, resets the confirmation field in the same mode and clears it on exit', () => {
+    const harness = setupHarness();
+    harness.setMode('doorSettingsEdit');
+    const config: MobileTextEntry = { label: 'New four-digit PIN', value: '0042', maxLength: 4, inputMode: 'numeric', secret: true, submitLabel: 'Save' };
+    harness.setCustomTextEntry(config);
+    harness.controller.sync();
+    const input = element<HTMLInputElement>('textInput');
+    expect(input.type).toBe('password');
+    expect(input.inputMode).toBe('numeric');
+    expect(input.autocomplete).toBe('off');
+    expect(input.value).toBe('0042');
+    input.focus();
+    harness.setCustomTextEntry({ ...config, label: 'Confirm new PIN', value: '' });
+    harness.controller.sync();
+    expect(input.value).toBe('');
+    input.value = '0042';
+    harness.setMode('doorSettings');
+    harness.controller.sync();
+    expect(input.value).toBe('');
     expect(element('textForm').classList.contains('hidden')).toBe(true);
   });
 

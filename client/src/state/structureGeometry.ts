@@ -38,7 +38,7 @@ export function buildWallEdgeIndex(structures: Iterable<WallStructure>): WallEdg
       const door = wall.doors?.find((candidate) => candidate.offset === offset);
       if (door?.isOpen) continue;
       const effectiveWall = door
-        ? { ...wall, title: door.title, movementBlocked: true, soundTransmission: 0.15, occlusionLowpassHz: 1200 }
+        ? { ...wall, title: door.title, movementBlocked: true }
         : wall;
       index.set(edgeKey(wall.floorZ, wall.orientation, lineX, lineY), effectiveWall);
     }

@@ -31,6 +31,8 @@ async def test_duplicate_any_type_owned_by_another_user(make_world, item_type):
     result = await duplicate(world, copier, source)
 
     assert result.ok
+    label = "radio" if item_type == "radio_station" else item_type
+    assert result.message == f"You duplicated {source.title} ({label}) here."
     copy = world.server.item_service.items[result.itemId]
     assert copy.id != source.id
     assert copy.title == source.title

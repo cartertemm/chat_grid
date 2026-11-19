@@ -555,6 +555,7 @@ export const worldSoundSchema = z.object({
   z: z.number().int(),
   acousticZoneId: z.string().min(1),
   range: z.number().int().positive().optional(),
+  doorOrientation: z.enum(['horizontal', 'vertical']).optional(),
 });
 
 export const incomingMessageSchema = z.discriminatedUnion('type', [

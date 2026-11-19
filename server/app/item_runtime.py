@@ -449,7 +449,7 @@ class ItemRuntime:
             client,
             True,
             "duplicate",
-            f"You duplicated {item.title} ({self._item_type_label(item)}) here. You own the copy.",
+            f"You duplicated {item.title} ({self._item_type_label(item)}) here.",
             item.id,
         )
 

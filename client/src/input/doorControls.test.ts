@@ -55,30 +55,11 @@ describe('door controls', () => {
     expect(adjacentWallDescriptions([wall], 1, 1, 0)).toEqual(['Studio, north, closed, locked']);
     const listener = { x: 1, y: 1, z: 0 };
     const source = { x: 1, y: 2, z: 0 };
-    expect(wallAcousticMixBetween([wall], listener, source).gain).toBeCloseTo(0.15);
+    expect(wallAcousticMixBetween([wall], listener, source).gain).toBe(wall.soundTransmission);
     const opened = { ...wall, doors: [{ ...protectedSide.door, isOpen: true }] };
     expect(blockingWallForMove([opened], 1, 1, 0, 1, 2)).toBeNull();
     expect(blockingWallForMove([opened], 0, 1, 0, 0, 2)).not.toBeNull();
     expect(wallAcousticMixBetween([opened], listener, source).gain).toBe(1);
-  });
-
-  it('shows PIN policy only for Keypad and initially selects Unlock', () => {
-    Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: vi.fn() });
-    const choose = vi.fn();
-    const controls = createDoorControls({ send: vi.fn(), choose, confirm: vi.fn(), status: vi.fn(),
-      normal: vi.fn(), focusGrid: vi.fn(), gridSize: () => 41, cue: vi.fn(), keypadSound: vi.fn() });
-    const plain = { ...wall, doors: wall.doors?.map(d => ({ ...d, unlockMode: 'none' as const, hasPin: false })) };
-    controls.edit(plain, vi.fn());
-    choose.mock.lastCall![0].onSelect('d');
-    choose.mock.lastCall![0].onSelect('settings');
-    const group = document.querySelector('fieldset')!;
-    const mode = document.querySelector('select')!;
-    expect(group.hidden).toBe(true);
-    expect(group.disabled).toBe(true);
-    mode.value = 'keypad';
-    mode.dispatchEvent(new Event('change'));
-    expect(group.hidden).toBe(false);
-    expect(group.querySelectorAll('select')[1].value).toBe('unlock');
   });
 
   it.each([true, false])('plays the server result after four beeps and a pause (accepted: %s)', async (ok) => {
@@ -91,6 +72,12 @@ describe('door controls', () => {
     const send = vi.fn();
     const controls = createDoorControls({
       send,
+      blip: vi.fn(),
+      textState: { nicknameInput: '', cursorPos: 0 },
+      applyTextInputEdit: vi.fn(),
+      setReplaceTextOnNextType: vi.fn(),
+      setMode: vi.fn(),
+      getWall: () => wall,
       choose: vi.fn(),
       confirm: vi.fn(),
       status: vi.fn(),

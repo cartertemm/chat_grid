@@ -47,7 +47,7 @@ This document is the authoritative keymap for the client.
 - `Shift+O`: Inspect all item properties
 - `D`: Pick up or drop item
 - `Z`: Manage items
-- `Duplicate here` in item management creates a separate copy on your square, owned by you, and selects the new copy for editing. Anyone with item creation permission can duplicate another user's item. The usual creation quota and rate limit apply.
+- `Duplicate here` in item management creates a separate copy on your square, owned by you, and returns you to the grid after a single confirmation. Anyone with item creation permission can duplicate another user's item. The usual creation quota and rate limit apply.
 - `Hand to user`: Select an eligible nearby user to receive a held item without changing ownership.
 - `Transfer ownership`: Change an item’s owner without moving it or changing who holds it.
 - `Space` in item management menu: Read tooltip/help for the selected action
@@ -76,9 +76,9 @@ The keypad beeps once per digit. The success or failure sound plays after the fo
 - On transmission or low-pass, `ArrowLeft`/`ArrowRight` changes one numeric step and `PageDown`/`PageUp` changes ten steps. Inside the numeric editor, use `ArrowDown`/`ArrowUp` and the corresponding page keys.
 - `Space`: Read specific help for the selected World Builder action, preset, direction, or wall. Property help uses shared metadata to report its type, options or numeric range, and editability.
 - Edit walls > select wall > Doors lists its attached doors. Add door selects an unused unit edge by number and coordinates. A wall can have multiple doors. Sliding and rotating moves them with the wall. Remove a door before trimming away its edge.
-- Door settings offers a name and unlock mode. Keypad mode adds a four-digit PIN, keypad side(s), Require PIN for (Unlock by default, Lock, or Both), and an unlock timeout of 0 to 300 seconds. Zero keeps the door unlocked until manually locked. Expiry arms the lock even if the door is open; passage remains possible until it closes.
+- Door settings uses the World Builder controls. Up/Down selects a property, Left/Right adjusts an option or timeout, Enter edits a value or opens its option list, and Escape goes back. Choosing Keypad and confirming its PIN arms the lock. An open door stays open and requires the PIN on its protected side after it closes. Keypad mode adds a four-digit PIN, keypad side(s), Require PIN for (Unlock by default, Lock, or Both), and an unlock timeout of 0 to 300 seconds. Zero keeps the door unlocked until manually locked. Expiry arms the lock even if the door is open; passage remains possible until it closes.
 - Walls are edited live. Other connected clients receive and render changes immediately.
-- `Regions` opens the named-place submenu. Add a one-square region at your current tile or choose an existing region on this floor. Edit its name with Enter, adjust Start X/Y and End X/Y with Left/Right, or slide its complete rectangle with Slide X/Y. Deletion uses the default-No confirmation. Regions may overlap and have no audio settings.
+- `Add region` creates a one-square region at your current tile. `Edit regions` lists existing regions on this floor. Both actions are in the World Builder menu alongside the ambiance actions. Edit its name with Enter, adjust Start X/Y and End X/Y with Left/Right, or slide its complete rectangle with Slide X/Y. Deletion uses the default-No confirmation. Regions may overlap and have no audio settings.
 - `C` includes every named region containing your tile, smallest inclusive area first. For example, inside a closet within a studio it reads `Closet, Studio`. Coordinates and adjacent wall information are retained.
 - Wall deletion uses the same default-No confirmation flow as item deletion; confirmation choices do not have tooltips.
 - Brick, glass, and fence walls block movement. Curtains may be crossed; wall impacts and curtain crossings play the structure's contact sound locally and spatially for nearby users.

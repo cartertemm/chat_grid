@@ -73,7 +73,7 @@ function createFixture() {
 }
 
 describe('item interaction controller', () => {
-  it('duplicates another owner\'s item and selects the returned copy among stacked items', () => {
+  it('duplicates another owner\'s item and returns to normal mode', () => {
     const { controller, deps, ground } = createFixture();
     ground.createdBy = 'someone-else';
     deps.hasPermission.mockImplementation((permission: string) => permission === 'item.create');
@@ -81,12 +81,9 @@ describe('item interaction controller', () => {
     controller.beginItemManagement(ground);
     controller.handleItemManageOptionsModeInput('Enter', 'Enter');
     expect(deps.signalingSend).toHaveBeenCalledWith({ type: 'item_duplicate', itemId: ground.id });
-    const copy = { ...ground, id: 'new-copy', createdBy: PLAYER_ID };
-    deps.state.items.set(copy.id, copy);
-    expect(controller.handleDuplicateResult({ type: 'item_action_result', action: 'duplicate', ok: true, itemId: copy.id, message: 'Copy created.' })).toBe(true);
-    expect(deps.state.selectedItemId).toBe('new-copy');
-    expect(deps.state.mode).toBe('itemProperties');
-    expect(deps.updateStatus).toHaveBeenLastCalledWith(expect.stringContaining('New copy selected.'));
+    expect(deps.state.selectedItemId).toBeNull();
+    expect(deps.state.mode).toBe('normal');
+    expect(deps.updateStatus).not.toHaveBeenCalled();
   });
   it('keeps held items distinguishable while selecting use, secondary use, edit, inspect, and manage actions', () => {
     const contexts: Array<{

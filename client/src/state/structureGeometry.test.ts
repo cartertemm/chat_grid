@@ -30,6 +30,25 @@ function wall(overrides: Partial<WallStructure> = {}): WallStructure {
 }
 
 describe('wall structure geometry', () => {
+  it.each(['horizontal', 'vertical'] as const)('inherits current wall acoustics at a closed %s door', (orientation) => {
+    const run = wall({
+      startX: 4, startY: 5, orientation, length: 3,
+      doors: [{
+        id: 'door', offset: 0, title: 'Door', isOpen: false, isLocked: false,
+        hasPin: false, unlockMode: 'none', keypadSides: 'both', pinRequiredFor: 'unlock',
+        unlockTimeoutSeconds: 0, revision: 0,
+      }],
+    });
+    const positive = { x: 4, y: 5, z: 0 };
+    const negative = orientation === 'horizontal' ? { x: 4, y: 4, z: 0 } : { x: 3, y: 5, z: 0 };
+    expect(wallAcousticMixBetween([run], negative, positive)).toEqual({ gain: 0, lowpassHz: 800 });
+    expect(wallAcousticMixBetween([run], positive, negative)).toEqual({ gain: 0, lowpassHz: 800 });
+    run.soundTransmission = 0.6;
+    run.occlusionLowpassHz = 2200;
+    expect(wallAcousticMixBetween([run], negative, positive)).toEqual({ gain: 0.6, lowpassHz: 2200 });
+    run.doors![0].isOpen = true;
+    expect(wallAcousticMixBetween([run], negative, positive)).toEqual({ gain: 1, lowpassHz: 20_000 });
+  });
   it('expands a wall run into its covered edges', () => {
     const run = wall();
     expect(wallContainsEdge(run, 'horizontal', 2, 3)).toBe(true);

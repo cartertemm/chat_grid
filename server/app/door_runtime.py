@@ -363,7 +363,10 @@ class DoorRuntime:
             door = next(door for door in updated.doors if door.id == packet.doorId)
         if packet.action == "remove":
             updated.doors.remove(door)
+            message = "Door removed."
         else:
+            message = "Door saved."
+            was_keypad = door.unlockMode == "keypad"
             if packet.pin is not None and (
                 packet.pin
                 and (
@@ -389,6 +392,10 @@ class DoorRuntime:
                 raise StructureError(
                     "Set a four-digit PIN before enabling keypad mode."
                 )
+            if door.unlockMode == "keypad" and not was_keypad:
+                door.isLocked = True
+                door.unlockDeadlineMs = None
+                message = "Keypad enabled. Door locked."
             if door.unlockMode == "none":
                 door.isLocked = False
                 door.unlockDeadlineMs = None
@@ -420,8 +427,6 @@ class DoorRuntime:
         self.sessions.pop(door.id, None)
         self.structures.structures[wall.id] = updated
         await self.publish(updated)
-        result = self._result(
-            packet, "Door removed." if packet.action == "remove" else "Door saved."
-        )
+        result = self._result(packet, message)
         result.doorId = door.id
         return result
