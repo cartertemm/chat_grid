@@ -111,6 +111,7 @@ export type GameMode =
   | 'worldBuilderPropertyEdit'
   | 'doorSettings'
   | 'doorSettingsEdit'
+  | 'doorKeypad'
   | 'worldBuilderRegionList'
   | 'worldBuilderRegionActions'
   | 'worldBuilderRegionEdit'

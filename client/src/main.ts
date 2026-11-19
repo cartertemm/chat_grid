@@ -3000,6 +3000,10 @@ function handleNicknameModeInput(code: string, key: string, ctrlKey: boolean): v
 }
 
 function handleModeInput(input: ModeInput): void {
+  if (state.mode === 'doorKeypad') {
+    doorControls.handleKeypadInput(input.code, input.key);
+    return;
+  }
   if (state.mode === 'doorSettings' || state.mode === 'doorSettingsEdit') {
     doorControls.handleSettingsInput(state.mode, input.code, input.key, input.ctrlKey);
     return;
@@ -3087,6 +3091,7 @@ function closeSettings(): void {
 }
 
 function getMobileTextEntry(): MobileTextEntry | null {
+  if (state.mode === 'doorKeypad') return doorControls.getKeypadTextEntry();
   if (state.mode === 'doorSettingsEdit') return doorControls.getSettingsTextEntry();
   const maxLength = textInputMaxLengthForMode(state.mode);
   if (maxLength === null) return null;
@@ -3208,6 +3213,10 @@ mobileControls = setupMobileControls({
   toggleMute,
   getTextEntry: getMobileTextEntry,
   setTextEntry: (value, cursor) => {
+    if (state.mode === 'doorKeypad') {
+      doorControls.setKeypadText(value);
+      return;
+    }
     if (state.mode === 'doorSettingsEdit') {
       doorControls.setSettingsText(value, cursor);
       return;
