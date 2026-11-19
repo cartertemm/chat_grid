@@ -2,6 +2,8 @@
 
 This document is the authoritative keymap for the client.
 
+## Property editors
+
 In property editors, moving to a setting reads its name and current value. Adjusting the selected setting reads only the new value. For example, stepping a door's unlock timeout from 10 to 11 seconds reads “11 seconds.” Validation errors still explain what needs to change.
 
 Press Space on a property row or in its option list to hear help for the current selection. Numeric property help includes the range and step when defined. In a numeric editor, Up and Down move one step, and Page Up and Page Down move ten. Text fields and private PIN entry keep their typing controls.
