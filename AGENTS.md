@@ -30,6 +30,7 @@
 - Python docstrings: for `server/app` changes, include module docstring, class docstring, and docstrings for public functions/methods where behavior/contracts matter.
 - Shared logic first: when behavior is reused across modes/features, implement it in shared helpers/modules rather than duplicating branch-specific logic.
 - Settings feedback: use `announcePropertyValue` in `client/src/input/propertyControls.ts` for changes to the selected property. Use the full row label for navigation. When the server returns the display value, announce it once on confirmation.
+- Settings controls: use `handleMenuRowKey` for row navigation and Space help. Supply the existing tooltip or `describePropertyHelp` with the property's metadata. Use `applyNumericPropertyKey` for stepping in numeric text editors.
 - Keep `main.ts` as orchestration glue. Move reusable feature logic to focused modules; ask before large/structural refactors.
 - Keep protocol changes synced in `client/src/network/protocol.ts` and `server/app/models.py`.
 

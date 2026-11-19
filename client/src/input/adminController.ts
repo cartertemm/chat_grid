@@ -1,10 +1,10 @@
-import { handleListControlKey } from './listController';
+import { handleListControlKey, handleMenuRowKey } from './listController';
 import { getEditSessionAction } from './editSession';
 import { handleYesNoMenuInput, YES_NO_OPTIONS } from './yesNoMenu';
 import type { IncomingMessage, OutgoingMessage } from '../network/protocol';
 import type { GameMode } from '../state/gameState';
 import { formatLastSeen } from '../ui/lastSeen';
-import { announcePropertyValue } from './propertyControls';
+import { announcePropertyValue, formatPropertyRow } from './propertyControls';
 
 export type AdminMenuAction = {
   id: string;
@@ -243,18 +243,18 @@ export function createAdminController(deps: AdminControllerDeps): {
       deps.state.mode = 'normal';
       return;
     }
-    const control = handleListControlKey(code, key, adminMenuActions, adminMenuIndex, (entry) => entry.label);
+    const control = handleMenuRowKey(code, key, adminMenuActions, adminMenuIndex, {
+      label: (entry) => entry.label,
+      tooltip: (entry) => entry.tooltip,
+      updateStatus: deps.updateStatus,
+      blip: deps.sfxUiBlip,
+      helpBlip: deps.sfxUiBlip,
+    });
     if (control.type === 'move') {
       adminMenuIndex = control.index;
-      deps.updateStatus(adminMenuActions[adminMenuIndex].label);
-      deps.sfxUiBlip();
       return;
     }
-    if (code === 'Space') {
-      deps.updateStatus(adminMenuActions[adminMenuIndex]?.tooltip ?? 'No tooltip available.');
-      deps.sfxUiBlip();
-      return;
-    }
+    if (code === 'Space') return;
     if (control.type === 'select') {
       const selected = adminMenuActions[adminMenuIndex];
       if (!selected) return;
@@ -346,30 +346,22 @@ export function createAdminController(deps: AdminControllerDeps): {
       return;
     }
     const entries = [...adminPermissionKeys, '__delete_role__'];
-    const control = handleListControlKey(code, key, entries, adminRolePermissionIndex, (entry) =>
-      entry === '__delete_role__' ? `Delete role ${role.name}` : `${entry}: ${role.permissions.includes(entry) ? 'on' : 'off'}`,
-    );
+    const control = handleMenuRowKey(code, key, entries, adminRolePermissionIndex, {
+      label: (entry) => entry === '__delete_role__'
+        ? `Delete role ${role.name}.`
+        : formatPropertyRow(entry, role.permissions.includes(entry) ? 'on' : 'off'),
+      tooltip: (entry) => entry === '__delete_role__'
+        ? 'Delete the current role and reassign affected users.'
+        : adminPermissionTooltips[entry],
+      updateStatus: deps.updateStatus,
+      blip: deps.sfxUiBlip,
+      helpBlip: deps.sfxUiBlip,
+    });
     if (control.type === 'move') {
       adminRolePermissionIndex = control.index;
-      const value = entries[adminRolePermissionIndex];
-      if (value === '__delete_role__') {
-        deps.updateStatus(`Delete role ${role.name}.`);
-      } else {
-        deps.updateStatus(`${value}: ${role.permissions.includes(value) ? 'on' : 'off'}`);
-      }
-      deps.sfxUiBlip();
       return;
     }
-    if (code === 'Space') {
-      const value = entries[adminRolePermissionIndex];
-      if (value === '__delete_role__') {
-        deps.updateStatus('Delete the current role and reassign affected users.');
-      } else {
-        deps.updateStatus(adminPermissionTooltips[value] || 'No tooltip available.');
-      }
-      deps.sfxUiBlip();
-      return;
-    }
+    if (code === 'Space') return;
     if (control.type === 'select') {
       const value = entries[adminRolePermissionIndex];
       if (value === '__delete_role__') {

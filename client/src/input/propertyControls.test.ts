@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   adjustPropertyValue,
+  applyNumericPropertyKey,
   announcePropertyValue,
   describePropertyHelp,
   getPropertyOptions,
@@ -8,6 +9,25 @@ import {
 } from './propertyControls';
 
 describe('shared property controls', () => {
+  it('recovers invalid numeric text, updates the cursor, and reports the clamped value once', () => {
+    const state = { nicknameInput: 'invalid', cursorPos: 2 };
+    const feedback = {
+      setReplaceTextOnNextType: vi.fn(),
+      updateStatus: vi.fn(),
+      cue: vi.fn(),
+    };
+    const metadata = { valueType: 'number', range: { min: 0, max: 1, step: 0.05 } };
+    expect(applyNumericPropertyKey('PageUp', state, metadata, feedback, 0.95)).toMatchObject({
+      value: 1, hitBoundary: true,
+    });
+    expect(state).toEqual({ nicknameInput: '1', cursorPos: 1 });
+    expect(feedback.setReplaceTextOnNextType).toHaveBeenCalledWith(false);
+    expect(feedback.updateStatus.mock.calls).toEqual([['1']]);
+    expect(feedback.cue).toHaveBeenCalledWith(false);
+    expect(applyNumericPropertyKey('ArrowLeft', state, metadata, feedback)).toBeNull();
+    expect(feedback.updateStatus).toHaveBeenCalledTimes(1);
+  });
+
   it('announces the display value of a selected setting', () => {
     const spoken: string[] = [];
     const announce = (value: string) => spoken.push(value);

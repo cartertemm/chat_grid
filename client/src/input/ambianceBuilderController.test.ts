@@ -83,6 +83,22 @@ function openAmbianceActions(controller: ReturnType<typeof createWorldBuilderCon
 }
 
 describe('World Builder ambiance controls', () => {
+  it('reads property metadata help for ambiance geometry and volume without editing', () => {
+    const { controller, state, send, updateStatus } = setup();
+    openAmbianceActions(controller, state);
+    for (let step = 0; step < 2; step++) controller.handleAmbianceActions('ArrowDown', 'ArrowDown');
+    controller.handleAmbianceActions('Space', ' ');
+    expect(updateStatus).toHaveBeenLastCalledWith(
+      'Move the west edge by one square with Left or Right. Type: number. Editable.',
+    );
+    for (let step = 0; step < 6; step++) controller.handleAmbianceActions('ArrowDown', 'ArrowDown');
+    controller.handleAmbianceActions('Space', ' ');
+    expect(updateStatus).toHaveBeenLastCalledWith(
+      'Set the ambiance volume from silent to full volume. Type: number. Range: 0 to 100 step 5. Editable.',
+    );
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it('announces one server-confirmed value and plays one sound for an arrow adjustment', () => {
     const { controller, state, updateStatus, blip, confirm, cancel } = setup();
     openAmbianceActions(controller, state);

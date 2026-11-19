@@ -66,6 +66,19 @@ function setup(keypad = true) {
 }
 
 describe('native door settings', () => {
+  it('reads help for the selected keypad property without editing it', () => {
+    const test = setup();
+    for (let i = 0; i < 3; i++) test.key('ArrowDown');
+    test.key('Space', ' ');
+    expect(test.status).toHaveBeenLastCalledWith(expect.stringContaining('Options: Both, South, North.'));
+    test.key('ArrowDown');
+    test.key('ArrowDown');
+    test.key('Space', ' ');
+    expect(test.status).toHaveBeenLastCalledWith(expect.stringContaining('Range: 0 to 300 step 1.'));
+    expect(test.mode()).toBe('doorSettings');
+    expect(test.send).not.toHaveBeenCalled();
+  });
+
   it('edits the name on Enter and waits for the authoritative revision before another update', () => {
     const test = setup();
     test.key('Enter');

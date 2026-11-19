@@ -35,7 +35,7 @@ import { describeHeldItems, formatCarryingSuffix, getCarriedItems } from './item
 import { getInteractionItems } from './items/itemTargets';
 import { resolveMainModeCommand, type MainModeCommand } from './input/mainCommandRouter';
 import { dispatchModeInput } from './input/modeDispatcher';
-import { handleListControlKey } from './input/listController';
+import { handleListControlKey, handleMenuRowKey } from './input/listController';
 import { createAdminController, type AdminMenuAction } from './input/adminController';
 import { createDoorControls } from './input/doorControls';
 import { adjacentDoors } from './state/structureGeometry';
@@ -51,7 +51,7 @@ import { getEditSessionAction } from './input/editSession';
 import { createOptionSelector } from './input/optionSelector';
 import { createConfirmationController } from './input/confirmationController';
 import { formatSteppedNumber, snapNumberToStep } from './input/numeric';
-import { announcePropertyValue } from './input/propertyControls';
+import { adjustPropertyValue, applyNumericPropertyKey, announcePropertyValue } from './input/propertyControls';
 import { type IncomingMessage, type OutgoingMessage } from './network/protocol';
 import { createOnMessageHandler } from './network/messageHandlers';
 import { SignalingClient } from './network/signalingClient';
@@ -116,6 +116,10 @@ const MIC_CALIBRATION_TARGET_RMS = 0.12;
 const MIC_CALIBRATION_ACTIVE_RMS_THRESHOLD = 0.003;
 const MIC_INPUT_GAIN_SCALE_MULTIPLIER = 2;
 const MIC_INPUT_GAIN_STEP = 0.05;
+const MIC_GAIN_METADATA = {
+  valueType: 'number',
+  range: { min: MIC_CALIBRATION_MIN_GAIN, max: MIC_CALIBRATION_MAX_GAIN, step: MIC_INPUT_GAIN_STEP },
+};
 const HEARTBEAT_INTERVAL_MS = 10_000;
 const AUDIO_SUBSCRIPTION_REFRESH_MS = 500;
 const TELEPORT_SQUARES_PER_SECOND = 20;
@@ -2599,20 +2603,18 @@ function handleCommandPaletteModeInput(code: string, key: string): void {
     audio.sfxUiCancel();
     return;
   }
-  const control = handleListControlKey(code, key, commandPaletteCommands, commandPaletteIndex, (entry) => formatCommandMenuLabel(entry));
+  const control = handleMenuRowKey(code, key, commandPaletteCommands, commandPaletteIndex, {
+    label: formatCommandMenuLabel,
+    tooltip: (entry) => entry.tooltip,
+    updateStatus,
+    blip: () => audio.sfxUiBlip(),
+    helpBlip: () => audio.sfxUiBlip(),
+  });
   if (control.type === 'move') {
     commandPaletteIndex = control.index;
-    updateStatus(formatCommandMenuLabel(commandPaletteCommands[commandPaletteIndex]));
-    audio.sfxUiBlip();
     return;
   }
-  if (code === 'Space') {
-    const selected = commandPaletteCommands[commandPaletteIndex];
-    if (!selected) return;
-    updateStatus(selected.tooltip || 'No tooltip available.');
-    audio.sfxUiBlip();
-    return;
-  }
+  if (code === 'Space') return;
   if (control.type === 'select') {
     executeCommandPaletteSelection();
     return;
@@ -2659,23 +2661,13 @@ function handleChatModeInput(code: string, key: string, ctrlKey: boolean): void 
 
 /** Handles direct microphone gain editing mode with keyboard stepping and validation. */
 function handleMicGainEditModeInput(code: string, key: string, ctrlKey: boolean): void {
-  if (code === 'ArrowUp' || code === 'ArrowDown' || code === 'PageUp' || code === 'PageDown') {
-    const raw = Number(state.nicknameInput.trim());
-    const base = Number.isFinite(raw) ? raw : audio.getOutboundInputGain();
-    const multiplier = code === 'PageUp' || code === 'PageDown' ? 10 : 1;
-    const delta = (code === 'ArrowUp' || code === 'PageUp' ? MIC_INPUT_GAIN_STEP : -MIC_INPUT_GAIN_STEP) * multiplier;
-    const attempted = snapNumberToStep(base + delta, MIC_INPUT_GAIN_STEP, MIC_CALIBRATION_MIN_GAIN);
-    const next = clampMicInputGain(attempted);
-    state.nicknameInput = formatSteppedNumber(next, MIC_INPUT_GAIN_STEP);
-    state.cursorPos = state.nicknameInput.length;
-    replaceTextOnNextType = false;
-    audio.setOutboundInputGain(next);
-    updateStatus(state.nicknameInput);
-    if (Math.abs(next - base) < 1e-9 || Math.abs(next - attempted) > 1e-9) {
-      audio.sfxUiCancel();
-    } else {
-      audio.sfxUiBlip();
-    }
+  const adjustment = applyNumericPropertyKey(code, state, MIC_GAIN_METADATA, {
+    setReplaceTextOnNextType: (replace) => { replaceTextOnNextType = replace; },
+    updateStatus,
+    cue: (success) => success ? audio.sfxUiBlip() : audio.sfxUiCancel(),
+  }, audio.getOutboundInputGain());
+  if (adjustment) {
+    audio.setOutboundInputGain(Number(adjustment.value));
     return;
   }
 
@@ -2698,7 +2690,7 @@ function handleMicGainEditModeInput(code: string, key: string, ctrlKey: boolean)
     state.mode = 'normal';
     replaceTextOnNextType = false;
     restoreLoopbackAfterMicGainEdit();
-    updateStatus(`Microphone gain set to ${formatSteppedNumber(applied, MIC_INPUT_GAIN_STEP)}.`);
+    announcePropertyValue(updateStatus, formatSteppedNumber(applied, MIC_INPUT_GAIN_STEP));
     audio.sfxUiConfirm();
     return;
   }
@@ -2753,17 +2745,13 @@ function handleListModeInput(code: string, key: string): void {
     const entry = state.peers.get(peerId);
     if (!entry) return;
     const current = getPeerListenGainForNickname(entry.nickname);
-    const delta = code === 'ArrowRight' ? MIC_INPUT_GAIN_STEP : -MIC_INPUT_GAIN_STEP;
-    const attempted = snapNumberToStep(current + delta, MIC_INPUT_GAIN_STEP, MIC_CALIBRATION_MIN_GAIN);
-    const next = clampMicInputGain(attempted);
+    const adjustment = adjustPropertyValue(code, current, MIC_GAIN_METADATA)!;
+    const next = Number(adjustment.value);
     setPeerListenGainForNickname(entry.nickname, next);
     peerManager.setPeerListenGain(peerId, next);
-    announcePropertyValue(updateStatus, formatSteppedNumber(next, MIC_INPUT_GAIN_STEP));
-    if (Math.abs(next - current) < 1e-9 || Math.abs(next - attempted) > 1e-9) {
-      audio.sfxUiCancel();
-    } else {
-      audio.sfxUiBlip();
-    }
+    announcePropertyValue(updateStatus, adjustment.displayValue);
+    if (adjustment.hitBoundary) audio.sfxUiCancel();
+    else audio.sfxUiBlip();
     return;
   }
 
@@ -2863,20 +2851,19 @@ function handleAddItemModeInput(code: string, key: string): void {
     audio.sfxUiCancel();
     return;
   }
-  const control = handleListControlKey(code, key, itemTypeSequence, state.addItemTypeIndex, (itemType) => itemTypeLabel(itemType));
+  const control = handleMenuRowKey(code, key, itemTypeSequence, state.addItemTypeIndex, {
+    label: (itemType) => `${itemTypeLabel(itemType)}.`,
+    searchLabel: itemTypeLabel,
+    tooltip: getItemTypeTooltip,
+    updateStatus,
+    blip: () => audio.sfxUiBlip(),
+    helpBlip: () => audio.sfxUiBlip(),
+  });
   if (control.type === 'move') {
     state.addItemTypeIndex = control.index;
-    updateStatus(`${itemTypeLabel(itemTypeSequence[state.addItemTypeIndex])}.`);
-    audio.sfxUiBlip();
     return;
   }
-  if (code === 'Space') {
-    const itemType = itemTypeSequence[state.addItemTypeIndex];
-    const tooltip = getItemTypeTooltip(itemType);
-    updateStatus(tooltip ? tooltip : 'No tooltip available.');
-    audio.sfxUiBlip();
-    return;
-  }
+  if (code === 'Space') return;
   if (control.type === 'select') {
     signaling.send({ type: 'item_add', itemType: itemTypeSequence[state.addItemTypeIndex] });
     state.mode = 'normal';

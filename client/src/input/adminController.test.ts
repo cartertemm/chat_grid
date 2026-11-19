@@ -33,6 +33,9 @@ describe('admin controller registered-user list', () => {
 
     controller.openAdminMenu();
     expect(deps.announceMenuEntry).toHaveBeenCalledWith('Users', 'List users');
+    controller.handleAdminMenuModeInput('Space', ' ');
+    expect(deps.updateStatus).toHaveBeenLastCalledWith('List registered users.');
+    expect(deps.signalingSend).not.toHaveBeenCalled();
 
     controller.handleAdminMenuModeInput('Enter', 'Enter');
     expect(deps.signalingSend).toHaveBeenCalledWith({ type: 'admin_users_list' });
@@ -66,8 +69,14 @@ describe('admin controller role mutations', () => {
       type: 'admin_roles_list',
       roles: [{ id: 1, name: 'builder', isSystem: false, userCount: 0, permissions: ['build'] }],
       permissionKeys: ['build', 'chat'],
+      permissionTooltips: { build: 'Create and edit world structures.' },
     });
     controller.handleAdminRoleListModeInput('Enter', 'Enter');
+    deps.sfxUiBlip.mockClear();
+    controller.handleAdminRolePermissionListModeInput('Space', ' ');
+    expect(deps.updateStatus).toHaveBeenLastCalledWith('Create and edit world structures.');
+    expect(deps.sfxUiBlip).toHaveBeenCalledOnce();
+    expect(deps.signalingSend).not.toHaveBeenCalled();
     controller.handleAdminRolePermissionListModeInput('Enter', 'Enter');
     expect(deps.updateStatus).toHaveBeenLastCalledWith('off');
     expect(deps.signalingSend).toHaveBeenLastCalledWith({

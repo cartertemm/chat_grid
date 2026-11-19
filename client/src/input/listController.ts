@@ -38,3 +38,33 @@ export function handleListControlKey<T>(
   if (code === 'Escape') return { type: 'cancel' };
   return { type: 'none' };
 }
+
+/** Navigate labeled rows and read the selected row's help on Space. */
+export function handleMenuRowKey<T>(
+  code: string,
+  key: string,
+  entries: readonly T[],
+  index: number,
+  feedback: {
+    label: (row: T) => string;
+    searchLabel?: (row: T) => string;
+    tooltip: (row: T) => string | undefined;
+    updateStatus: (message: string) => void;
+    blip: () => void;
+    helpBlip?: () => void;
+  },
+): ListControlResult {
+  if (code === 'Space') {
+    if (index >= 0 && index < entries.length) {
+      feedback.updateStatus(feedback.tooltip(entries[index]) || 'No tooltip available.');
+      feedback.helpBlip?.();
+    }
+    return { type: 'none' };
+  }
+  const control = handleListControlKey(code, key, entries, index, feedback.searchLabel ?? feedback.label);
+  if (control.type === 'move') {
+    feedback.updateStatus(feedback.label(entries[control.index]));
+    feedback.blip();
+  }
+  return control;
+}

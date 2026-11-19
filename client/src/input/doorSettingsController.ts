@@ -2,11 +2,11 @@ import type { DoorAction, IncomingMessage } from '../network/protocol';
 import type { GameMode, WallDoor, WallStructure } from '../state/gameState';
 import type { OptionSelectorRequest } from './optionSelector';
 import type { MobileTextEntry } from './mobileController';
-import { handleListControlKey } from './listController';
+import { handleMenuRowKey } from './listController';
 import { applyTextInput, mapTextInputKey } from './textInput';
-import { adjustPropertyValue, announcePropertyValue, formatPropertyValue } from './propertyControls';
+import { adjustPropertyValue, applyNumericPropertyKey, announcePropertyValue, formatPropertyValue, formatPropertyRow, describePropertyHelp } from './propertyControls';
 
-const TIMEOUT_METADATA = { valueType: 'number', range: { min: 0, max: 300, step: 1 } };
+const TIMEOUT_METADATA = { valueType: 'number', tooltip: 'Set the seconds before an unlocked door locks again. Zero keeps it unlocked.', range: { min: 0, max: 300, step: 1 } };
 
 type Property = 'title' | 'unlockMode' | 'pin' | 'keypadSides' | 'pinRequiredFor' | 'unlockTimeoutSeconds';
 type Deps = {
@@ -70,11 +70,28 @@ export function createDoorSettingsController(deps: Deps) {
     return ['unlock', 'lock', 'both'].map((id) => ({ id, label: id[0].toUpperCase() + id.slice(1) }));
   }
 
+  function propertyMetadata(property: Property) {
+    switch (property) {
+      case 'title':
+        return { valueType: 'text', maxLength: 80, tooltip: 'Press Enter to edit the door name.' };
+      case 'pin':
+        return { tooltip: 'Enter and confirm a new four-digit PIN. The existing PIN is never displayed.' };
+      case 'unlockTimeoutSeconds':
+        return TIMEOUT_METADATA;
+      case 'unlockMode':
+        return { valueType: 'list', options: options(property), tooltip: 'Choose whether the door uses a keypad lock.' };
+      case 'keypadSides':
+        return { valueType: 'list', options: options(property), tooltip: 'Choose which approaches to the door require the keypad.' };
+      case 'pinRequiredFor':
+        return { valueType: 'list', options: options(property), tooltip: 'Choose which lock actions require entering the PIN.' };
+    }
+  }
+
   function entries() {
     const current = door();
     if (!current) return [];
     function row(id: Property, name: string, value: string) {
-      return { id, name, value, label: `${name}, ${value}` };
+      return { id, name, value, label: formatPropertyRow(name, value, ', ') };
     }
     const optionRow = (id: 'unlockMode' | 'keypadSides' | 'pinRequiredFor', name: string) =>
       row(id, name, formatPropertyValue(current[id], { options: options(id) }));
@@ -196,28 +213,19 @@ export function createDoorSettingsController(deps: Deps) {
       }
     }
     if (property === 'unlockMode' || property === 'keypadSides' || property === 'pinRequiredFor') {
-      const adjustment = adjustPropertyValue(code, current[property], { options: options(property) });
+      const adjustment = adjustPropertyValue(code, current[property], propertyMetadata(property));
       if (adjustment) {
         chooseValue(property, String(adjustment.value));
         return;
       }
     }
-    if (code === 'Space') {
-      deps.status(
-        property === 'pin'
-          ? 'Enter and confirm a new four-digit PIN. The existing PIN is never displayed.'
-          : property === 'title'
-            ? 'Press Enter to edit the door name.'
-            : 'Use Left or Right to adjust, or Enter to select or edit. Timeout is 0 to 300 seconds, where 0 stays unlocked.',
-      );
-      return;
-    }
-    const control = handleListControlKey(code, key, rows, index, (entry) => entry.label);
-    if (control.type === 'move') {
-      index = control.index;
-      deps.status(rows[index].label);
-      deps.blip();
-    }
+    const control = handleMenuRowKey(code, key, rows, index, {
+      label: (row) => row.label,
+      tooltip: (row) => describePropertyHelp(row.name, propertyMetadata(row.id), true),
+      updateStatus: deps.status,
+      blip: deps.blip,
+    });
+    if (control.type === 'move') index = control.index;
     if (control.type !== 'select') return;
     if (property === 'title' || property === 'unlockTimeoutSeconds' || property === 'pin') {
       beginEdit(property, property === 'pin' ? '' : String(current[property]));
@@ -227,6 +235,7 @@ export function createDoorSettingsController(deps: Deps) {
       title: rows[index].name,
       options: options(property),
       selectedId: String(current[property]),
+      propertyHelp: () => describePropertyHelp(rows[index].name, propertyMetadata(property), true),
       onSelect: (id) => chooseValue(property, id),
       onCancel: menu,
     });
@@ -272,15 +281,19 @@ export function createDoorSettingsController(deps: Deps) {
       else deps.status('Enter a whole number from 0 to 300.');
       return;
     }
-    if (editing === 'unlockTimeoutSeconds' && ['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown'].includes(code)) {
-      const adjustment = adjustPropertyValue(code, text, TIMEOUT_METADATA, 'vertical')!;
-      text = adjustment.displayValue;
-      if (adjustment.hitBoundary) deps.cue(false);
-      cursor = text.length;
+    if (editing === 'unlockTimeoutSeconds' && applyNumericPropertyKey(
+      code, deps.textState, TIMEOUT_METADATA,
+      {
+        setReplaceTextOnNextType: deps.setReplaceTextOnNextType,
+        updateStatus: deps.status,
+        cue: (success) => success ? deps.blip() : deps.cue(false),
+      },
+      door()?.unlockTimeoutSeconds,
+    )) {
+      text = deps.textState.nicknameInput;
+      cursor = deps.textState.cursorPos;
       replace = false;
-      deps.textState.nicknameInput = text;
-      deps.textState.cursorPos = cursor;
-      deps.setReplaceTextOnNextType(false);
+      return;
     } else if (editing === 'title' || editing === 'unlockTimeoutSeconds') {
       deps.applyTextInputEdit(code, key, editing === 'title' ? 80 : 3, ctrlKey, true);
       return;

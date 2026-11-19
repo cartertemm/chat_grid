@@ -19,6 +19,8 @@ describe('item property value feedback', () => {
     const signalingSend = vi.fn();
     const updateStatus = vi.fn();
     const suppressItemPropertyEchoMs = vi.fn();
+    const describeItemPropertyHelp = vi.fn(() => 'Enable or disable playback. Type: boolean. Editable.');
+    const sfxUiBlip = vi.fn();
     const editor = createItemPropertyEditor({
       state,
       signalingSend,
@@ -29,15 +31,21 @@ describe('item property value feedback', () => {
       isItemPropertyEditable: () => true,
       getItemPropertyOptionValues: () => undefined,
       openOptionSelector: vi.fn(),
-      describeItemPropertyHelp: () => '',
+      describeItemPropertyHelp,
       getItemPropertyMetadata: () => ({ valueType: 'boolean' }),
       validateNumericItemPropertyInput: () => ({ ok: false, message: 'Not numeric.' }),
       applyTextInputEdit: vi.fn(),
       setReplaceTextOnNextType: vi.fn(),
-      sfxUiBlip: vi.fn(),
+      sfxUiBlip,
       sfxUiCancel: vi.fn(),
     });
 
+    editor.handleItemPropertiesModeInput('Space', ' ');
+    expect(updateStatus).toHaveBeenLastCalledWith('Enable or disable playback. Type: boolean. Editable.');
+    expect(describeItemPropertyHelp).toHaveBeenCalledWith(item, 'enabled');
+    expect(sfxUiBlip).toHaveBeenCalledOnce();
+    expect(signalingSend).not.toHaveBeenCalled();
+    updateStatus.mockClear();
     editor.handleItemPropertiesModeInput('Enter', 'Enter');
 
     expect(updateStatus.mock.calls).toEqual([['off']]);

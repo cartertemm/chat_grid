@@ -61,6 +61,22 @@ function setup() {
 }
 
 describe('World Builder wall controls', () => {
+  it('reads shared metadata help for the selected acoustic property', () => {
+    const { controller, send, updateStatus } = setup();
+    for (let step = 0; step < 5; step++) controller.handleWallActions('ArrowDown', 'ArrowDown');
+    controller.handleWallActions('Enter', 'Enter');
+    controller.handlePropertyList('Space', ' ');
+    expect(updateStatus).toHaveBeenLastCalledWith(
+      'Set how much sound passes through the wall, from silent to unchanged. Type: number. Range: 0 to 1 step 0.05. Editable.',
+    );
+    controller.handlePropertyList('ArrowDown', 'ArrowDown');
+    controller.handlePropertyList('Space', ' ');
+    expect(updateStatus).toHaveBeenLastCalledWith(
+      'Set the highest frequency that passes through the wall. Type: number. Range: 20 to 20000 step 100. Editable.',
+    );
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it('announces only the confirmed setting value and preserves server errors', () => {
     const { controller, state, updateStatus } = setup();
     updateStatus.mockClear();

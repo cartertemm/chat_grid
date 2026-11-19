@@ -1,18 +1,19 @@
-import { handleListControlKey } from './listController';
+import { handleMenuRowKey } from './listController';
 import { getEditSessionAction } from './editSession';
+import { describePropertyHelp, formatPropertyRow } from './propertyControls';
 import type { NamedRegion } from '../state/gameState';
 import { containingRegions } from '../state/regions';
 import type { WorldBuilderDeps } from './worldBuilderController';
 
 const ACTIONS = [
-  { id: 'name', label: 'Name' },
-  { id: 'startX', label: 'Start X' },
-  { id: 'startY', label: 'Start Y' },
-  { id: 'endX', label: 'End X' },
-  { id: 'endY', label: 'End Y' },
-  { id: 'slideX', label: 'Slide X' },
-  { id: 'slideY', label: 'Slide Y' },
-  { id: 'delete', label: 'Delete region' },
+  { id: 'name', label: 'Name', tooltip: 'Set the name announced when someone checks their region.' },
+  { id: 'startX', label: 'Start X', tooltip: 'Move the west edge by one square with Left or Right.' },
+  { id: 'startY', label: 'Start Y', tooltip: 'Move the south edge by one square with Left or Right.' },
+  { id: 'endX', label: 'End X', tooltip: 'Move the east edge by one square with Left or Right.' },
+  { id: 'endY', label: 'End Y', tooltip: 'Move the north edge by one square with Left or Right.' },
+  { id: 'slideX', label: 'Slide X', tooltip: 'Move the whole rectangle along X by one square with Left or Right.' },
+  { id: 'slideY', label: 'Slide Y', tooltip: 'Move the whole rectangle along Y by one square with Left or Right.' },
+  { id: 'delete', label: 'Delete region', tooltip: 'Delete this named region after confirmation.' },
 ] as const;
 type Action = typeof ACTIONS[number]['id'];
 const EDGES = { startX: 'west', endX: 'east', startY: 'south', endY: 'north' } as const;
@@ -50,7 +51,7 @@ export function createRegionBuilderController(deps: WorldBuilderDeps, onBack: ()
     selectedId = region.id;
     index = 0;
     deps.state.mode = 'worldBuilderRegionActions';
-    deps.announceMenuEntry(region.name, `Name: ${region.name}`);
+    deps.announceMenuEntry(region.name, formatPropertyRow('Name', region.name));
   }
 
   function label(region: NamedRegion): string {
@@ -77,15 +78,15 @@ export function createRegionBuilderController(deps: WorldBuilderDeps, onBack: ()
 
   function handleMenu<T extends { label: string }>(
     code: string, key: string, entries: readonly T[], select: (entry: T) => void, back: () => void,
+    tooltip: (entry: T) => string | undefined,
   ): void {
-    const control = handleListControlKey(code, key, entries, index, (entry) => entry.label);
+    const control = handleMenuRowKey(code, key, entries, index, {
+      label: (entry) => entry.label, tooltip, updateStatus: deps.updateStatus, blip: deps.blip,
+    });
     if (control.type === 'move') {
       index = control.index;
-      deps.updateStatus(entries[index].label);
-      deps.blip();
     } else if (control.type === 'select') select(entries[index]);
     else if (control.type === 'cancel') { back(); deps.cancel(); }
-    else if (code === 'Space') deps.updateStatus('Enter selects. Left and Right adjust bounds or slide a region by one square.');
   }
 
   function handleList(code: string, key: string): void {
@@ -94,7 +95,7 @@ export function createRegionBuilderController(deps: WorldBuilderDeps, onBack: ()
       selectedId = entry.id;
       const region = current();
       if (region) openActions(region);
-    }, onBack);
+    }, onBack, () => 'Press Enter to edit this region.');
   }
 
   function handleActions(code: string, key: string): void {
@@ -103,10 +104,10 @@ export function createRegionBuilderController(deps: WorldBuilderDeps, onBack: ()
     if (!region) return;
     const entries = ACTIONS.map((entry) => ({
       ...entry,
-      label: entry.id === 'name' ? `Name: ${region.name}`
-        : entry.id in EDGES ? `${entry.label}: ${region[entry.id as keyof typeof EDGES]}`
-          : entry.id === 'slideX' ? `Slide X: ${region.startX} to ${region.endX}`
-            : entry.id === 'slideY' ? `Slide Y: ${region.startY} to ${region.endY}` : entry.label,
+      label: entry.id === 'name' ? formatPropertyRow('Name', region.name)
+        : entry.id in EDGES ? formatPropertyRow(entry.label, region[entry.id as keyof typeof EDGES])
+          : entry.id === 'slideX' ? formatPropertyRow('Slide X', `${region.startX} to ${region.endX}`)
+            : entry.id === 'slideY' ? formatPropertyRow('Slide Y', `${region.startY} to ${region.endY}`) : entry.label,
     }));
     const action: Action = entries[index].id;
     if (code === 'ArrowLeft' || code === 'ArrowRight') {
@@ -133,7 +134,14 @@ export function createRegionBuilderController(deps: WorldBuilderDeps, onBack: ()
           onCancel: () => { if (current()) openActions(region); },
         });
       } else deps.updateStatus('Use Left or Right to adjust by one square.');
-    }, openList);
+    }, openList, (entry) => {
+      if (entry.id === 'delete') return entry.tooltip;
+      return describePropertyHelp(entry.label, {
+        valueType: entry.id === 'name' ? 'text' : 'number',
+        tooltip: entry.tooltip,
+        ...(entry.id === 'name' ? { maxLength: 100 } : {}),
+      }, true);
+    });
   }
 
   function handleEdit(code: string, key: string, ctrlKey = false): void {
