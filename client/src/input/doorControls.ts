@@ -94,8 +94,8 @@ export function createDoorControls(deps: Deps) {
     deps.choose({
       title: wall.title + ' doors',
       options: [
-        { id: 'add', label: 'Add door' },
-        ...doors.map((d) => ({ id: d.id, label: d.title + ', edge ' + (d.offset + 1) })),
+        { id: 'add', label: 'Add door', tooltip: 'Choose an available edge on this wall for the door.' },
+        ...doors.map((d) => ({ id: d.id, label: d.title + ', edge ' + (d.offset + 1), tooltip: 'Edit or remove this door.' })),
       ],
       onCancel: back,
       onSelect(id) {
@@ -122,6 +122,7 @@ export function createDoorControls(deps: Deps) {
           deps.choose({
             title: 'Add door',
             options,
+            propertyHelp: () => 'Press Enter to place a door on the selected wall edge.',
             onCancel: back,
             onSelect(offset) {
               back();
@@ -138,8 +139,8 @@ export function createDoorControls(deps: Deps) {
         deps.choose({
           title: door.title,
           options: [
-            { id: 'settings', label: 'Door settings' },
-            { id: 'remove', label: 'Remove door' },
+            { id: 'settings', label: 'Door settings', tooltip: 'Edit the door name and lock settings.' },
+            { id: 'remove', label: 'Remove door', tooltip: 'Remove this door and restore the wall edge after confirmation.' },
           ],
           onCancel: back,
           onSelect(action) {

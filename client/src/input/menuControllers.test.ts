@@ -14,6 +14,26 @@ function deps() {
 }
 
 describe('shared menu controllers', () => {
+  it('reads option help on Space and falls back to the property help', () => {
+    const shared = deps();
+    const onSelect = vi.fn();
+    const propertyHelp = vi.fn(() => 'Choose which approaches require the keypad.');
+    const selector = createOptionSelector(shared);
+    selector.open({
+      title: 'Keypad sides',
+      options: [{ id: 'both', label: 'Both', tooltip: 'Protect both approaches.' }, { id: 'north', label: 'North' }],
+      propertyHelp, onSelect, onCancel: vi.fn(),
+    });
+    selector.handleInput('Space', ' ');
+    expect(shared.updateStatus).toHaveBeenLastCalledWith('Protect both approaches.');
+    selector.handleInput('ArrowDown', 'ArrowDown');
+    expect(propertyHelp).not.toHaveBeenCalled();
+    selector.handleInput('Space', ' ');
+    expect(shared.updateStatus).toHaveBeenLastCalledWith('Choose which approaches require the keypad.');
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(shared.state.mode).toBe('optionSelect');
+  });
+
   it('selects a current option through the reusable option flow', () => {
     const shared = deps();
     const onSelect = vi.fn();

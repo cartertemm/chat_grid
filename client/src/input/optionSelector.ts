@@ -1,12 +1,13 @@
 import type { GameMode } from '../state/gameState';
-import { handleListControlKey } from './listController';
+import { handleMenuRowKey } from './listController';
 
-export type OptionSelectorEntry = { id: string; label: string };
+export type OptionSelectorEntry = { id: string; label: string; tooltip?: string };
 
 export type OptionSelectorRequest = {
   title: string;
   options: OptionSelectorEntry[];
   selectedId?: string;
+  propertyHelp?: () => string;
   onSelect: (id: string) => void;
   onCancel: () => void;
 };
@@ -46,11 +47,14 @@ export function createOptionSelector(deps: OptionSelectorDeps) {
       deps.blip();
       return;
     }
-    const control = handleListControlKey(code, key, request.options, index, (entry) => entry.label);
+    const control = handleMenuRowKey(code, key, request.options, index, {
+      label: (entry) => entry.label,
+      tooltip: (entry) => entry.tooltip ?? request?.propertyHelp?.(),
+      updateStatus: deps.updateStatus,
+      blip: deps.blip,
+    });
     if (control.type === 'move') {
       index = control.index;
-      deps.updateStatus(request.options[index].label);
-      deps.blip();
       return;
     }
     if (control.type === 'select') {

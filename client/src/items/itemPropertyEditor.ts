@@ -1,8 +1,8 @@
-import { handleListControlKey } from '../input/listController';
+import { handleMenuRowKey } from '../input/listController';
 import { getEditSessionAction } from '../input/editSession';
 import { type WorldItem } from '../state/gameState';
 import type { OptionSelectorRequest } from '../input/optionSelector';
-import { adjustPropertyValue, getPropertyOptions } from '../input/propertyControls';
+import { adjustPropertyValue, applyNumericPropertyKey, announcePropertyValue, formatPropertyRow, getPropertyOptions } from '../input/propertyControls';
 
 /**
  * Dependencies required to drive item property inspect/edit flows.
@@ -70,21 +70,21 @@ export function createItemPropertyEditor(deps: EditorDeps): {
       deps.sfxUiCancel();
       return;
     }
-    const control = handleListControlKey(code, key, deps.state.itemPropertyKeys, deps.state.itemPropertyIndex, (propertyKey) => propertyKey);
+    const control = handleMenuRowKey(code, key, deps.state.itemPropertyKeys, deps.state.itemPropertyIndex, {
+      label: (propertyKey) => formatPropertyRow(
+        deps.itemPropertyLabel(propertyKey), deps.getItemPropertyValue(item, propertyKey),
+      ),
+      searchLabel: (propertyKey) => propertyKey,
+      tooltip: (propertyKey) => deps.describeItemPropertyHelp(item, propertyKey),
+      updateStatus: deps.updateStatus,
+      blip: deps.sfxUiBlip,
+      helpBlip: deps.sfxUiBlip,
+    });
     if (control.type === 'move') {
       deps.state.itemPropertyIndex = control.index;
-      const selectedKey = deps.state.itemPropertyKeys[deps.state.itemPropertyIndex];
-      const value = deps.getItemPropertyValue(item, selectedKey);
-      deps.updateStatus(`${deps.itemPropertyLabel(selectedKey)}: ${value}`);
-      deps.sfxUiBlip();
       return;
     }
-    if (code === 'Space') {
-      const selectedKey = deps.state.itemPropertyKeys[deps.state.itemPropertyIndex];
-      deps.updateStatus(deps.describeItemPropertyHelp(item, selectedKey));
-      deps.sfxUiBlip();
-      return;
-    }
+    if (code === 'Space') return;
     if (code === 'ArrowLeft' || code === 'ArrowRight' || code === 'PageUp' || code === 'PageDown') {
       const selectedKey = deps.state.itemPropertyKeys[deps.state.itemPropertyIndex];
       if (!deps.isItemPropertyEditable(item, selectedKey)) {
@@ -107,7 +107,7 @@ export function createItemPropertyEditor(deps: EditorDeps): {
       deps.suppressItemPropertyEchoMs(600);
       deps.signalingSend({ type: 'item_update', itemId, params: { [selectedKey]: adjustment.value } });
       deps.onPreviewPropertyChange?.(item, selectedKey, adjustment.value);
-      deps.updateStatus(adjustment.displayValue);
+      announcePropertyValue(deps.updateStatus, adjustment.value, metadata);
       if (adjustment.hitBoundary) deps.sfxUiCancel();
       else deps.sfxUiBlip();
       return;
@@ -123,9 +123,10 @@ export function createItemPropertyEditor(deps: EditorDeps): {
       if (metadata?.valueType === 'boolean') {
         const current = deps.getItemPropertyValue(item, selectedKey).toLowerCase() === 'on';
         const nextValue = !current;
+        deps.suppressItemPropertyEchoMs(600);
         deps.signalingSend({ type: 'item_update', itemId, params: { [selectedKey]: nextValue } });
         deps.onPreviewPropertyChange?.(item, selectedKey, nextValue);
-        deps.updateStatus(`${deps.itemPropertyLabel(selectedKey)}: ${nextValue ? 'on' : 'off'}`);
+        announcePropertyValue(deps.updateStatus, nextValue, metadata);
         deps.sfxUiBlip();
         return;
       }
@@ -139,6 +140,7 @@ export function createItemPropertyEditor(deps: EditorDeps): {
           title: `Select ${deps.itemPropertyLabel(selectedKey)}`,
           options,
           selectedId: deps.getItemPropertyValue(item, selectedKey),
+          propertyHelp: () => deps.describeItemPropertyHelp(item, selectedKey),
           onSelect: (selectedValue) => {
             deps.signalingSend({ type: 'item_update', itemId, params: { [selectedKey]: selectedValue } });
             deps.onPreviewPropertyChange?.(item, selectedKey, selectedValue);
@@ -196,28 +198,18 @@ export function createItemPropertyEditor(deps: EditorDeps): {
       deps.sfxUiCancel();
       return;
     }
-    if (code === 'ArrowUp' || code === 'ArrowDown' || code === 'PageUp' || code === 'PageDown') {
-      const metadata = deps.getItemPropertyMetadata(item.type, propertyKey);
-      if (metadata?.valueType === 'number') {
-        const rawCurrent = Number(deps.state.nicknameInput.trim());
-        const paramCurrent = Number(item.params[propertyKey]);
-        const currentValue = Number.isFinite(rawCurrent)
-          ? rawCurrent
-          : Number.isFinite(paramCurrent)
-            ? paramCurrent
-            : metadata.range?.min ?? 0;
-        const adjustment = adjustPropertyValue(code, currentValue, metadata, 'vertical');
-        if (adjustment) {
-          deps.state.nicknameInput = adjustment.displayValue;
-          deps.state.cursorPos = deps.state.nicknameInput.length;
-          deps.setReplaceTextOnNextType(false);
-          deps.onPreviewPropertyChange?.(item, propertyKey, adjustment.value);
-          deps.updateStatus(deps.state.nicknameInput);
-          if (adjustment.hitBoundary) deps.sfxUiCancel();
-          else deps.sfxUiBlip();
-          return;
-        }
-      }
+    const numericAdjustment = applyNumericPropertyKey(
+      code, deps.state, deps.getItemPropertyMetadata(item.type, propertyKey),
+      {
+        setReplaceTextOnNextType: deps.setReplaceTextOnNextType,
+        updateStatus: deps.updateStatus,
+        cue: (success) => success ? deps.sfxUiBlip() : deps.sfxUiCancel(),
+      },
+      item.params[propertyKey],
+    );
+    if (numericAdjustment) {
+      deps.onPreviewPropertyChange?.(item, propertyKey, numericAdjustment.value);
+      return;
     }
     const editAction = getEditSessionAction(code);
     if (editAction === 'submit') {

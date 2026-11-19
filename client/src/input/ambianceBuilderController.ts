@@ -1,9 +1,12 @@
-import { handleListControlKey } from './listController';
+import { handleMenuRowKey } from './listController';
 import { getEditSessionAction } from './editSession';
 import { formatSteppedNumber } from './numeric';
 import {
   adjustPropertyValue,
+  applyNumericPropertyKey,
+  announcePropertyValue,
   describePropertyHelp,
+  formatPropertyRow,
   getPropertyOptions,
   validateNumericPropertyInput,
   type PropertyControlMetadata,
@@ -150,16 +153,16 @@ export function createAmbianceBuilderController(deps: WorldBuilderDeps & { onBac
   function actionEntries(ambiance: AmbianceRegion | null): MenuEntry<AmbianceAction>[] {
     return AMBIANCE_ACTIONS.map((entry) => {
       if (!ambiance) return { ...entry };
-      if (entry.id === 'type') return { ...entry, label: `${entry.label}: ${ambianceTypeTitle(ambiance.soundId)}` };
-      if (entry.id === 'name') return { ...entry, label: `${entry.label}: ${ambiance.name}` };
-      if (entry.id === 'startX') return { ...entry, label: `${entry.label}: ${ambiance.startX}` };
-      if (entry.id === 'startY') return { ...entry, label: `${entry.label}: ${ambiance.startY}` };
-      if (entry.id === 'endX') return { ...entry, label: `${entry.label}: ${ambiance.endX}` };
-      if (entry.id === 'endY') return { ...entry, label: `${entry.label}: ${ambiance.endY}` };
-      if (entry.id === 'slideX') return { ...entry, label: `${entry.label}: ${ambiance.startX} to ${ambiance.endX}` };
-      if (entry.id === 'slideY') return { ...entry, label: `${entry.label}: ${ambiance.startY} to ${ambiance.endY}` };
-      if (entry.id === 'volume') return { ...entry, label: `${entry.label}: ${formatSteppedNumber(ambiance.volume, 5)} percent` };
-      if (entry.id === 'fadeDistance') return { ...entry, label: `${entry.label}: ${formatSteppedNumber(ambiance.fadeDistance, 1)} squares` };
+      if (entry.id === 'type') return { ...entry, label: formatPropertyRow(entry.label, ambianceTypeTitle(ambiance.soundId)) };
+      if (entry.id === 'name') return { ...entry, label: formatPropertyRow(entry.label, ambiance.name) };
+      if (entry.id === 'startX') return { ...entry, label: formatPropertyRow(entry.label, ambiance.startX) };
+      if (entry.id === 'startY') return { ...entry, label: formatPropertyRow(entry.label, ambiance.startY) };
+      if (entry.id === 'endX') return { ...entry, label: formatPropertyRow(entry.label, ambiance.endX) };
+      if (entry.id === 'endY') return { ...entry, label: formatPropertyRow(entry.label, ambiance.endY) };
+      if (entry.id === 'slideX') return { ...entry, label: formatPropertyRow(entry.label, `${ambiance.startX} to ${ambiance.endX}`) };
+      if (entry.id === 'slideY') return { ...entry, label: formatPropertyRow(entry.label, `${ambiance.startY} to ${ambiance.endY}`) };
+      if (entry.id === 'volume') return { ...entry, label: formatPropertyRow(entry.label, `${formatSteppedNumber(ambiance.volume, 5)} percent`) };
+      if (entry.id === 'fadeDistance') return { ...entry, label: formatPropertyRow(entry.label, `${formatSteppedNumber(ambiance.fadeDistance, 1)} squares`) };
       return entry;
     });
   }
@@ -227,24 +230,23 @@ export function createAmbianceBuilderController(deps: WorldBuilderDeps & { onBac
     entries: readonly MenuEntry<T>[],
     onSelect: (entry: T) => void,
     onCancel: () => void,
+    tooltip: (entry: MenuEntry<T>) => string | undefined = (entry) => entry.tooltip,
   ): void {
     if (entries.length === 0) {
       onCancel();
       deps.cancel();
       return;
     }
-    const control = handleListControlKey(code, key, entries, index, (entry) => entry.label);
+    const control = handleMenuRowKey(code, key, entries, index, {
+      label: (entry) => entry.label, tooltip, updateStatus: deps.updateStatus, blip: deps.blip,
+    });
     if (control.type === 'move') {
       index = control.index;
-      deps.updateStatus(entries[index].label);
-      deps.blip();
     } else if (control.type === 'select') {
       onSelect(entries[index].id);
     } else if (control.type === 'cancel') {
       onCancel();
       deps.cancel();
-    } else if (code === 'Space') {
-      deps.updateStatus(entries[index].tooltip ?? 'No tooltip available.');
     }
   }
 
@@ -320,10 +322,6 @@ export function createAmbianceBuilderController(deps: WorldBuilderDeps & { onBac
       return;
     }
     if (currentAction === 'type') {
-      if (code === 'Space') {
-        deps.updateStatus(describePropertyHelp('Type', typeMetadata(types), true));
-        return;
-      }
       if (types.length === 0 && ['ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown'].includes(code)) {
         deps.updateStatus('No ambiance types are configured.');
         deps.cancel();
@@ -338,14 +336,6 @@ export function createAmbianceBuilderController(deps: WorldBuilderDeps & { onBac
       }
     }
     if (currentAction === 'volume' || currentAction === 'fadeDistance') {
-      if (code === 'Space') {
-        deps.updateStatus(describePropertyHelp(
-          currentAction === 'volume' ? 'Volume' : 'Fade distance',
-          propertyMetadata(currentAction),
-          true,
-        ));
-        return;
-      }
       const adjustment = adjustPropertyValue(
         code,
         ambiance[currentAction],
@@ -355,7 +345,7 @@ export function createAmbianceBuilderController(deps: WorldBuilderDeps & { onBac
         if (!hasPermission()) return;
         const value = Number(adjustment.value);
         if (value === ambiance[currentAction]) {
-          deps.updateStatus(adjustment.displayValue);
+          announcePropertyValue(deps.updateStatus, adjustment.value, propertyMetadata(currentAction));
           deps.cancel();
           return;
         }
@@ -363,19 +353,6 @@ export function createAmbianceBuilderController(deps: WorldBuilderDeps & { onBac
         return;
       }
     }
-    if (code === 'Space' && isAmbianceEdgeAction(currentAction)) {
-      deps.updateStatus(describePropertyHelp(entries[index].label, EDGE_METADATA[currentAction], true));
-      return;
-    }
-    if (code === 'Space' && isAmbianceSlideAction(currentAction)) {
-      deps.updateStatus(describePropertyHelp(entries[index].label, SLIDE_METADATA[currentAction], true));
-      return;
-    }
-    if (code === 'Space' && currentAction === 'name') {
-      deps.updateStatus(describePropertyHelp('Name', propertyMetadata('name'), true));
-      return;
-    }
-
     handleList(code, key, entries, (action) => {
       const current = selectedAmbiance();
       if (!current) {
@@ -392,11 +369,11 @@ export function createAmbianceBuilderController(deps: WorldBuilderDeps & { onBac
           title: 'Ambiance type',
           options: getPropertyOptions(typeMetadata(types)),
           selectedId: current.soundId,
+          propertyHelp: () => describePropertyHelp('Type', typeMetadata(types), true),
           onSelect: (soundId) => {
             if (!hasPermission()) return;
             if (!sendUpdate(current.id, 'soundId', soundId)) return;
             deps.state.mode = 'worldBuilderAmbianceActions';
-            announceCurrentAction();
           },
           onCancel: () => {
             if (!selectedAmbiance()) {
@@ -444,7 +421,14 @@ export function createAmbianceBuilderController(deps: WorldBuilderDeps & { onBac
         return;
       }
       deps.updateStatus(entries[index].tooltip ?? 'No tooltip available.');
-    }, openList);
+    }, openList, (entry) => {
+      if (entry.id === 'type') return describePropertyHelp('Type', typeMetadata(types), true);
+      if (isAmbianceEdgeAction(entry.id)) return describePropertyHelp(entry.label, EDGE_METADATA[entry.id], true);
+      if (isAmbianceSlideAction(entry.id)) return describePropertyHelp(entry.label, SLIDE_METADATA[entry.id], true);
+      if (entry.id === 'name' || entry.id === 'volume' || entry.id === 'fadeDistance')
+        return describePropertyHelp(editingPropertyLabel(entry.id), propertyMetadata(entry.id), true);
+      return entry.tooltip;
+    });
   }
 
   function editingPropertyLabel(property: AmbianceProperty | null): string {
@@ -459,24 +443,12 @@ export function createAmbianceBuilderController(deps: WorldBuilderDeps & { onBac
       handleStaleSelection();
       return;
     }
-    if (editingProperty !== 'name' && ['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown'].includes(code)) {
-      const rawCurrent = Number(deps.state.nicknameInput.trim());
-      const currentValue = Number.isFinite(rawCurrent) ? rawCurrent : ambiance[editingProperty];
-      const adjustment = adjustPropertyValue(
-        code,
-        currentValue,
-        propertyMetadata(editingProperty),
-        'vertical',
-      );
-      if (adjustment) {
-        deps.state.nicknameInput = adjustment.displayValue;
-        deps.state.cursorPos = deps.state.nicknameInput.length;
-        deps.setReplaceTextOnNextType(false);
-        deps.updateStatus(deps.state.nicknameInput);
-        if (adjustment.hitBoundary) deps.cancel();
-        else deps.blip();
-        return;
-      }
+    if (editingProperty !== 'name') {
+      if (applyNumericPropertyKey(code, deps.state, propertyMetadata(editingProperty), {
+        setReplaceTextOnNextType: deps.setReplaceTextOnNextType,
+        updateStatus: deps.updateStatus,
+        cue: (success) => success ? deps.blip() : deps.cancel(),
+      }, ambiance[editingProperty])) return;
     }
     const action = getEditSessionAction(code);
     if (action === 'cancel') {
@@ -525,7 +497,6 @@ export function createAmbianceBuilderController(deps: WorldBuilderDeps & { onBac
       editingProperty = null;
       deps.setReplaceTextOnNextType(false);
       deps.state.mode = 'worldBuilderAmbianceActions';
-      deps.updateStatus(`Updating ${label}.`);
       return;
     }
     deps.applyTextInputEdit(
@@ -546,11 +517,12 @@ export function createAmbianceBuilderController(deps: WorldBuilderDeps & { onBac
     // The server processes this client's requests in order and sends each result
     // after its canonical upsert. Failures also consume a request, without an upsert.
     if (message.action === 'update') pendingUpdates.shift();
-    deps.updateStatus(message.message);
     if (!message.ok) {
+      deps.updateStatus(message.message);
       deps.cancel();
       return;
     }
+    announcePropertyValue(deps.updateStatus, message.message);
     deps.confirm();
     if (message.action === 'add' && message.ambianceId) {
       const ambiance = deps.state.ambiances.get(message.ambianceId);

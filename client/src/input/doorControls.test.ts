@@ -72,7 +72,7 @@ describe('door controls', () => {
       message: 'Door saved.', structureId: 'w', doorId: 'd', keypadActive: false,
     } as const;
     controls.result(reply);
-    expect(status.mock.calls.flat()).toEqual(['Unlock mode, None']);
+    expect(status.mock.calls.flat()).toEqual(['None']);
     status.mockClear();
     controls.close();
     controls.result(reply);

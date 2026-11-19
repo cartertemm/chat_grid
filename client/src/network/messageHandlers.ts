@@ -1,6 +1,7 @@
 import { type IncomingMessage } from './protocol';
 import { getFacingDirection, type NamedRegion, type AmbianceRegion, type AmbianceType, type StructurePreset, type WallStructure, type WorldItem } from '../state/gameState';
 import { WORLD_FOOTSTEP_GAIN, type WorldSoundSource } from '../audio/worldAudio';
+import { announcePropertyValue } from '../input/propertyControls';
 
 /**
  * Dependency contract for creating a message handler without hard-coupling to `main.ts`.
@@ -69,7 +70,6 @@ type MessageHandlerDeps = {
   audioUiConfirm: () => void;
   audioUiCancel: () => void;
   recomputeActiveItemPropertyKeys: (itemId: string) => void;
-  itemPropertyLabel: (key: string) => string;
   getItemPropertyValue: (item: WorldItem, key: string) => string;
   getItemById: (itemId: string) => WorldItem | undefined;
   shouldAnnounceItemPropertyEcho: () => boolean;
@@ -358,6 +358,7 @@ export function createOnMessageHandler(deps: MessageHandlerDeps): (message: Inco
       }
 
       case 'item_upsert': {
+        const previousItem = deps.state.items.get(message.item.id);
         deps.state.items.set(message.item.id, {
           ...message.item,
           carrierId: message.item.carrierId ?? null,
@@ -366,8 +367,13 @@ export function createOnMessageHandler(deps: MessageHandlerDeps): (message: Inco
         deps.recomputeActiveItemPropertyKeys(message.item.id);
         if (deps.state.mode === 'itemProperties' && deps.state.selectedItemId === message.item.id) {
           const key = deps.state.itemPropertyKeys[deps.state.itemPropertyIndex];
-          if (key && deps.shouldAnnounceItemPropertyEcho()) {
-            deps.updateStatus(`${deps.itemPropertyLabel(key)}: ${deps.getItemPropertyValue(message.item, key)}`);
+          const value = key ? deps.getItemPropertyValue(message.item, key) : '';
+          if (
+            key && previousItem &&
+            value !== deps.getItemPropertyValue(previousItem, key) &&
+            deps.shouldAnnounceItemPropertyEcho()
+          ) {
+            announcePropertyValue(deps.updateStatus, value);
           }
         }
         await deps.refreshAudioSubscriptions(true);

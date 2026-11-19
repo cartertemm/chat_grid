@@ -1,4 +1,4 @@
-import { handleListControlKey } from '../input/listController';
+import { handleListControlKey, handleMenuRowKey } from '../input/listController';
 import type { ConfirmationRequest } from '../input/confirmationController';
 import type { IncomingMessage, OutgoingMessage } from '../network/protocol';
 import type { GameMode, SelectionContext, WorldItem } from '../state/gameState';
@@ -396,18 +396,18 @@ export function createItemInteractionController(deps: ItemControllerDeps): {
       return;
     }
     itemManagementOptionIndex = Math.max(0, Math.min(itemManagementOptionIndex, itemManagementOptions.length - 1));
-    const control = handleListControlKey(code, key, itemManagementOptions, itemManagementOptionIndex, (entry) => entry.label);
+    const control = handleMenuRowKey(code, key, itemManagementOptions, itemManagementOptionIndex, {
+      label: (entry) => entry.label,
+      tooltip: (entry) => entry.tooltip,
+      updateStatus: deps.updateStatus,
+      blip: deps.sfxUiBlip,
+      helpBlip: deps.sfxUiBlip,
+    });
     if (control.type === 'move') {
       itemManagementOptionIndex = control.index;
-      deps.updateStatus(itemManagementOptions[itemManagementOptionIndex].label);
-      deps.sfxUiBlip();
       return;
     }
-    if (code === 'Space') {
-      deps.updateStatus(itemManagementOptions[itemManagementOptionIndex]?.tooltip ?? 'No tooltip available.');
-      deps.sfxUiBlip();
-      return;
-    }
+    if (code === 'Space') return;
     if (control.type === 'select') {
       const option = itemManagementOptions[itemManagementOptionIndex];
       if (option.action === 'duplicate') {

@@ -33,6 +33,9 @@ describe('admin controller registered-user list', () => {
 
     controller.openAdminMenu();
     expect(deps.announceMenuEntry).toHaveBeenCalledWith('Users', 'List users');
+    controller.handleAdminMenuModeInput('Space', ' ');
+    expect(deps.updateStatus).toHaveBeenLastCalledWith('List registered users.');
+    expect(deps.signalingSend).not.toHaveBeenCalled();
 
     controller.handleAdminMenuModeInput('Enter', 'Enter');
     expect(deps.signalingSend).toHaveBeenCalledWith({ type: 'admin_users_list' });
@@ -59,6 +62,41 @@ describe('admin controller registered-user list', () => {
 });
 
 describe('admin controller role mutations', () => {
+  it('announces the permission while navigating and only its value when toggling', () => {
+    const deps = createDeps();
+    const controller = createAdminController(deps);
+    controller.handleAdminRolesList({
+      type: 'admin_roles_list',
+      roles: [{ id: 1, name: 'builder', isSystem: false, userCount: 0, permissions: ['build'] }],
+      permissionKeys: ['build', 'chat'],
+      permissionTooltips: { build: 'Create and edit world structures.' },
+    });
+    controller.handleAdminRoleListModeInput('Enter', 'Enter');
+    deps.sfxUiBlip.mockClear();
+    controller.handleAdminRolePermissionListModeInput('Space', ' ');
+    expect(deps.updateStatus).toHaveBeenLastCalledWith('Create and edit world structures.');
+    expect(deps.sfxUiBlip).toHaveBeenCalledOnce();
+    expect(deps.signalingSend).not.toHaveBeenCalled();
+    controller.handleAdminRolePermissionListModeInput('Enter', 'Enter');
+    expect(deps.updateStatus).toHaveBeenLastCalledWith('off');
+    expect(deps.signalingSend).toHaveBeenLastCalledWith({
+      type: 'admin_role_update_permissions', role: 'builder', permissions: [],
+    });
+    controller.handleAdminRolePermissionListModeInput('ArrowDown', 'ArrowDown');
+    expect(deps.updateStatus).toHaveBeenLastCalledWith('chat: off');
+    controller.handleAdminRolePermissionListModeInput('Enter', 'Enter');
+    expect(deps.updateStatus).toHaveBeenLastCalledWith('on');
+    expect(deps.signalingSend).toHaveBeenLastCalledWith({
+      type: 'admin_role_update_permissions', role: 'builder', permissions: ['chat'],
+    });
+    deps.updateStatus.mockClear();
+    const result = { type: 'admin_action_result', action: 'role_update_permissions' } as const;
+    controller.handleAdminActionResult({ ...result, ok: true, message: 'Updated permissions for builder.' });
+    expect(deps.updateStatus).not.toHaveBeenCalled();
+    controller.handleAdminActionResult({ ...result, ok: false, message: 'Not authorized.' });
+    expect(deps.updateStatus).toHaveBeenCalledWith('Not authorized.');
+  });
+
   it('refreshes roles after create and delete results', () => {
     const deps = createDeps();
     const controller = createAdminController(deps);

@@ -79,6 +79,10 @@ describe('item interaction controller', () => {
     deps.hasPermission.mockImplementation((permission: string) => permission === 'item.create');
     expect(controller.getManagementOptions(ground).map((option) => option.action)).toEqual(['duplicate']);
     controller.beginItemManagement(ground);
+    controller.handleItemManageOptionsModeInput('Space', ' ');
+    expect(deps.updateStatus).toHaveBeenLastCalledWith('Create an independent copy on your square. You own the copy.');
+    expect(deps.signalingSend).not.toHaveBeenCalled();
+    deps.updateStatus.mockClear();
     controller.handleItemManageOptionsModeInput('Enter', 'Enter');
     expect(deps.signalingSend).toHaveBeenCalledWith({ type: 'item_duplicate', itemId: ground.id });
     expect(deps.state.selectedItemId).toBeNull();

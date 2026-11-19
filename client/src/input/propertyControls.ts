@@ -23,6 +23,54 @@ export function getPropertyOptions(metadata: PropertyControlMetadata | undefined
   ));
 }
 
+export function formatPropertyValue(value: string | number | boolean, metadata?: PropertyControlMetadata): string {
+  const option = getPropertyOptions(metadata).find((entry) => entry.id === String(value));
+  if (option) return option.label;
+  if (typeof value === 'boolean') return value ? 'on' : 'off';
+  const step = metadata?.range?.step;
+  if (typeof value === 'number' && step && step > 0) return formatSteppedNumber(value, step);
+  return String(value);
+}
+
+/** Include the property name when navigating to its row. */
+export function formatPropertyRow(name: string, value: string | number, separator = ': '): string {
+  return `${name}${separator}${value}`;
+}
+
+/** While a setting is selected, speak only its new value. Navigation supplies the property name. */
+export function announcePropertyValue(
+  updateStatus: (message: string) => void,
+  value: string | number | boolean,
+  metadata?: PropertyControlMetadata,
+): void {
+  updateStatus(formatPropertyValue(value, metadata));
+}
+
+/** Step a numeric text editor using the same formatting, cursor, and feedback contract. */
+export function applyNumericPropertyKey(
+  code: string,
+  state: { nicknameInput: string; cursorPos: number },
+  metadata: PropertyControlMetadata | undefined,
+  feedback: {
+    setReplaceTextOnNextType: (replace: boolean) => void;
+    updateStatus: (message: string) => void;
+    cue: (success: boolean) => void;
+  },
+  fallback: unknown = 0,
+): PropertyAdjustment | null {
+  const parsed = Number(state.nicknameInput.trim());
+  const adjustment = adjustPropertyValue(
+    code, Number.isFinite(parsed) ? parsed : fallback, metadata, 'vertical',
+  );
+  if (!adjustment) return null;
+  state.nicknameInput = adjustment.displayValue;
+  state.cursorPos = adjustment.displayValue.length;
+  feedback.setReplaceTextOnNextType(false);
+  announcePropertyValue(feedback.updateStatus, adjustment.value, metadata);
+  feedback.cue(!adjustment.hitBoundary);
+  return adjustment;
+}
+
 /** Describe a property using shared type, range, option, and editability metadata. */
 export function describePropertyHelp(
   label: string,
@@ -69,7 +117,7 @@ export function adjustPropertyValue(
       ? currentValue
       : ['on', 'true', '1', 'yes'].includes(String(currentValue).trim().toLowerCase());
     const value = !current;
-    return { value, displayValue: value ? 'on' : 'off', hitBoundary: false };
+    return { value, displayValue: formatPropertyValue(value), hitBoundary: false };
   }
 
   if (metadata?.valueType !== 'number') return null;

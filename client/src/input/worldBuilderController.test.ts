@@ -61,6 +61,74 @@ function setup() {
 }
 
 describe('World Builder wall controls', () => {
+  it('reads shared metadata help for the selected acoustic property', () => {
+    const { controller, send, updateStatus } = setup();
+    for (let step = 0; step < 5; step++) controller.handleWallActions('ArrowDown', 'ArrowDown');
+    controller.handleWallActions('Enter', 'Enter');
+    controller.handlePropertyList('Space', ' ');
+    expect(updateStatus).toHaveBeenLastCalledWith(
+      'Set how much sound passes through the wall, from silent to unchanged. Type: number. Range: 0 to 1 step 0.05. Editable.',
+    );
+    controller.handlePropertyList('ArrowDown', 'ArrowDown');
+    controller.handlePropertyList('Space', ' ');
+    expect(updateStatus).toHaveBeenLastCalledWith(
+      'Set the highest frequency that passes through the wall. Type: number. Range: 20 to 20000 step 100. Editable.',
+    );
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('announces only the confirmed setting value and preserves server errors', () => {
+    const { controller, state, updateStatus } = setup();
+    updateStatus.mockClear();
+    controller.handleWallActions('ArrowRight', 'ArrowRight');
+    expect(updateStatus).not.toHaveBeenCalled();
+    state.structures.set('wall-1', { ...state.structures.get('wall-1')!, ...curtain, id: 'wall-1', preset: 'curtain' });
+    controller.handleActionResult({ ok: true, action: 'update', structureId: 'wall-1', message: 'Curtain' });
+    expect(updateStatus.mock.calls).toEqual([['Curtain']]);
+
+    controller.handleWallActions('ArrowDown', 'ArrowDown');
+    updateStatus.mockClear();
+    controller.handleWallActions('ArrowRight', 'ArrowRight');
+    state.structures.set('wall-1', { ...state.structures.get('wall-1')!, orientation: 'vertical' });
+    controller.handleActionResult({ ok: true, action: 'rotate', structureId: 'wall-1', message: 'Vertical' });
+    expect(updateStatus.mock.calls).toEqual([['Vertical']]);
+    controller.handleWallActions('ArrowRight', 'ArrowRight');
+    controller.handleActionResult({ ok: false, action: 'rotate', message: 'Wall does not fit.' });
+    expect(updateStatus).toHaveBeenLastCalledWith('Wall does not fit.');
+  });
+
+  it('announces only the acoustic value after an adjustment is accepted', () => {
+    const { controller, state, updateStatus } = setup();
+    for (let step = 0; step < 5; step++) controller.handleWallActions('ArrowDown', 'ArrowDown');
+    controller.handleWallActions('Enter', 'Enter');
+    updateStatus.mockClear();
+    controller.handlePropertyList('ArrowRight', 'ArrowRight');
+    expect(updateStatus).not.toHaveBeenCalled();
+    state.structures.set('wall-1', { ...state.structures.get('wall-1')!, soundTransmission: 0.05 });
+    controller.handleActionResult({ ok: true, action: 'update', structureId: 'wall-1', message: '0.05' });
+    expect(updateStatus.mock.calls).toEqual([['0.05']]);
+  });
+
+  it('keeps acoustic adjustments cumulative across canonical replies and discards rejected input', () => {
+    const { controller, send, state } = setup();
+    for (let step = 0; step < 5; step++) controller.handleWallActions('ArrowDown', 'ArrowDown');
+    controller.handleWallActions('Enter', 'Enter');
+    controller.handlePropertyList('ArrowRight', 'ArrowRight');
+    controller.handlePropertyList('ArrowRight', 'ArrowRight');
+    expect(state.structures.get('wall-1')?.soundTransmission).toBe(0);
+    state.structures.set('wall-1', { ...state.structures.get('wall-1')!, soundTransmission: 0.05 });
+    controller.handleActionResult({ ok: true, action: 'update', structureId: 'wall-1', message: '0.05' });
+    controller.handlePropertyList('ArrowRight', 'ArrowRight');
+    expect(send).toHaveBeenLastCalledWith({ type: 'structure_update_wall', structureId: 'wall-1', soundTransmission: 0.15 });
+    controller.handleActionResult({ ok: false, action: 'update', message: 'Rejected.' });
+    controller.handleActionResult({ ok: false, action: 'update', message: 'Rejected.' });
+    controller.handlePropertyList('ArrowRight', 'ArrowRight');
+    expect(send).toHaveBeenLastCalledWith({ type: 'structure_update_wall', structureId: 'wall-1', soundTransmission: 0.1 });
+    controller.setPresets([brick, curtain]);
+    controller.handlePropertyList('ArrowRight', 'ArrowRight');
+    expect(send).toHaveBeenLastCalledWith({ type: 'structure_update_wall', structureId: 'wall-1', soundTransmission: 0.1 });
+  });
+
   it('cycles wall types directly and opens the shared option selector', () => {
     const { controller, openOptionSelector, send, state, updateStatus } = setup();
 
@@ -75,7 +143,7 @@ describe('World Builder wall controls', () => {
       structureId: 'wall-1',
       preset: 'curtain',
     });
-    expect(state.structures.get('wall-1')?.preset).toBe('curtain');
+    expect(state.structures.get('wall-1')?.preset).toBe('brick');
     expect(state.structures.get('wall-1')?.id).toBe('wall-1');
 
     controller.handleWallActions('Enter', 'Enter');
@@ -157,4 +225,5 @@ describe('World Builder wall controls', () => {
     expect(state.mode).toBe('worldBuilderWallActions');
     expect(announceMenuEntry).toHaveBeenLastCalledWith('Brick', 'Type: Brick');
   });
+
 });
