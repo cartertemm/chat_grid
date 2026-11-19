@@ -355,9 +355,7 @@ class SignalingServer:
         await self.delivery.broadcast(
             WorldSoundPacket(
                 type="world_sound",
-                sound="/sounds/elevator_open.ogg"
-                if opened
-                else "/sounds/elevator_close.ogg",
+                sound="/sounds/door_open.ogg" if opened else "/sounds/door_close.ogg",
                 x=wall.startX
                 + (door.offset if wall.orientation == "horizontal" else 0),
                 y=wall.startY + (door.offset if wall.orientation == "vertical" else 0),

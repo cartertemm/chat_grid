@@ -90,9 +90,13 @@ async def test_shared_unlock_does_not_move_door(door_world):
     assert door(world, wall_id, door_id).isOpen
     assert (
         world.transport.last_packet_of_type(guest, WorldSoundPacket).sound
-        == "/sounds/elevator_open.ogg"
+        == "/sounds/door_open.ogg"
     )
     assert (await action(world, guest, wall_id, "close", doorId=door_id)).ok
+    assert (
+        world.transport.last_packet_of_type(guest, WorldSoundPacket).sound
+        == "/sounds/door_close.ogg"
+    )
     assert not door(world, wall_id, door_id).isLocked
 
 
