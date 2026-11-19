@@ -11,7 +11,7 @@ from websockets.asyncio.server import ServerConnection
 
 from .auth_service import AuthService
 from .acoustic_zones import client_acoustic_zone_id, floor_acoustic_zone_id
-from .client import ClientConnection
+from .client import ClientConnection, RateLimitName
 from .delivery import Delivery
 from .item_catalog import (
     get_item_definition,
@@ -66,8 +66,13 @@ class ItemRuntimeHost(Protocol):
     delivery: Delivery
     item_service: ItemService
     max_carried_items: int
+    max_items_per_user: int
 
     def _client_has_permission(self, client: ClientConnection, key: str) -> bool: ...
+
+    def _consume_rate_limit(
+        self, client: ClientConnection, name: RateLimitName
+    ) -> bool: ...
 
     def _is_in_bounds(self, x: int, y: int) -> bool: ...
 
@@ -202,6 +207,11 @@ class ItemRuntime:
 
         return self.host._client_has_permission(client, key)
 
+    def consume_rate_limit(self, client: ClientConnection, name: RateLimitName) -> bool:
+        """Count one action against a per-client rate limit; return whether it is allowed."""
+
+        return self.host._consume_rate_limit(client, name)
+
     def request_state_save(self) -> None:
         """Request coalesced persistence after an item mutation."""
 
@@ -295,6 +305,15 @@ class ItemRuntime:
             return
         if not is_known_item_type(packet.itemType):
             await self.send_result(client, False, "add", "Unknown item type.")
+            return
+        max_items = self.host.max_items_per_user
+        if client.user_id and self._owned_item_count(client.user_id) >= max_items:
+            await self.send_result(
+                client,
+                False,
+                "add",
+                f"You already own the maximum of {max_items} items. Delete one before placing another.",
+            )
             return
         item = self.item_service.default_item(client, packet.itemType)
         if item.type == "elevator":
@@ -706,6 +725,22 @@ class ItemRuntime:
                 transfer_item.id,
             )
             return
+        target = self._authenticated_client_for_user(target_user_id)
+        stored_username = (
+            None if target else self.auth_service.get_username_by_id(target_user_id)
+        )
+        if target is None and stored_username is None:
+            await self.send_result(
+                client,
+                False,
+                "transfer",
+                "Target user is not available.",
+                transfer_item.id,
+            )
+            return
+        # Account lookup accepts any spelling of the numeric id; store the
+        # canonical one so ownership checks and the item cap see one owner.
+        target_user_id = str(int(target_user_id)) if target is None else target_user_id
         if transfer_item.createdBy == target_user_id:
             await self.send_result(
                 client,
@@ -715,13 +750,22 @@ class ItemRuntime:
                 transfer_item.id,
             )
             return
-        target = self._authenticated_client_for_user(target_user_id)
+        max_items = self.host.max_items_per_user
+        if self._owned_item_count(target_user_id) >= max_items:
+            await self.send_result(
+                client,
+                False,
+                "transfer",
+                f"That user already owns the maximum of {max_items} items.",
+                transfer_item.id,
+            )
+            return
         target_username = (
             target.username
             if target and target.username
             else target.nickname
             if target
-            else self.auth_service.get_username_by_id(target_user_id) or target_user_id
+            else stored_username or target_user_id
         )
         transfer_item.createdBy = target_user_id
         transfer_item.createdByName = target_username
@@ -1348,6 +1392,11 @@ class ItemRuntime:
         actor_id = client.user_id or client.id
         actor_name = client.username or client.nickname or actor_id
         return actor_id, actor_name
+
+    def _owned_item_count(self, user_id: str) -> int:
+        """Count items owned by one account, for `items.max_items_per_user`."""
+
+        return sum(1 for item in self.items.values() if item.createdBy == user_id)
 
     @staticmethod
     def _owns_item(client: ClientConnection, item: WorldItem) -> bool:
