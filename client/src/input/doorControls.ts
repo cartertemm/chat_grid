@@ -5,6 +5,7 @@ import type { ConfirmationRequest } from './confirmationController';
 import type { NearbyDoor } from '../state/structureGeometry';
 import { createDoorSettingsController } from './doorSettingsController';
 import type { GameMode } from '../state/gameState';
+import type { MobileTextEntry } from './mobileController';
 
 type Result = Extract<IncomingMessage, { type: 'door_action_result' }>;
 type Deps = {
@@ -25,74 +26,67 @@ type Deps = {
   keypadSound: (name: 'keypad' | 'keypad_good' | 'keypad_bad') => Promise<void>;
 };
 
-function field(parent: HTMLElement, title: string, control: HTMLInputElement | HTMLSelectElement) {
-  const label = document.createElement('label');
-  label.textContent = title + ' ';
-  label.append(control);
-  parent.append(label);
-  return control;
-}
-
-function pinInput() {
-  const input = document.createElement('input');
-  input.type = 'password';
-  input.inputMode = 'numeric';
-  input.autocomplete = 'off';
-  input.maxLength = 4;
-  input.pattern = '[0-9]{4}';
-  return input;
-}
-
 /** Wall builder menus and the private, exclusive door keypad. */
 export function createDoorControls(deps: Deps) {
   const settings = createDoorSettingsController(deps);
-  let dialog: HTMLDialogElement | null = null;
   let keypad: { structureId: string; doorId: string } | null = null;
   let pending: { structureId: string; doorId: string } | null = null;
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
   let audioSession = 0;
   let digitSounds = Promise.resolve();
   let submitted = false;
+  let digits = '';
+  let keypadAction = 'unlock';
 
   function close(keepResultAudio = false) {
     settings.close();
     if (!keepResultAudio) audioSession++;
     digitSounds = Promise.resolve();
     submitted = false;
+    digits = '';
     clearTimeout(idleTimer);
+    const hadKeypad = keypad !== null;
     keypad = null;
     pending = null;
-    if (dialog) {
-      dialog.close();
-      dialog.remove();
-      dialog = null;
+    if (hadKeypad) {
+      deps.normal();
       deps.focusGrid();
     }
   }
 
-  function modal(title: string, cancel: () => void) {
+  function cancelKeypad() {
+    if (keypad) deps.send({ type: 'door_action', action: 'keypad_cancel', ...keypad });
     close();
-    const box = document.createElement('dialog');
-    box.className = 'door-dialog';
-    box.setAttribute('aria-label', title);
-    const heading = document.createElement('h2');
-    heading.textContent = title;
-    box.append(heading);
-    box.addEventListener('cancel', (event) => {
-      event.preventDefault();
-      cancel();
-    });
-    document.body.append(box);
-    dialog = box;
-    return box;
   }
 
-  function button(parent: HTMLElement, label: string, action: () => void) {
-    const node = document.createElement('button');
-    node.type = 'button';
-    node.textContent = label;
-    node.onclick = () => action();
-    parent.append(node);
+  function resetIdle() {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      cancelKeypad();
+      deps.status('Keypad timed out.');
+    }, 10_000);
+  }
+
+  function setKeypadText(value: string) {
+    if (!keypad || submitted || !value.startsWith(digits) || !/^\d{0,4}$/.test(value)) return;
+    const session = audioSession;
+    for (const digit of value.slice(digits.length)) {
+      digitSounds = digitSounds.then(async () => {
+        if (session === audioSession) await deps.keypadSound('keypad').catch(() => undefined);
+      });
+      deps.send({ type: 'door_action', action: 'keypad_digit', ...keypad, digit });
+    }
+    digits = value;
+    if (digits.length === 4) {
+      submitted = true;
+      digitSounds = digitSounds.then(() => new Promise<void>((resolve) => setTimeout(resolve, 300)));
+    }
+    resetIdle();
+  }
+
+  function handleKeypadInput(code: string, key: string) {
+    if (code === 'Escape') cancelKeypad();
+    else if (/^\d$/.test(key)) setKeypadText(digits + key);
   }
 
   function edit(wall: WallStructure, back: () => void) {
@@ -196,51 +190,17 @@ export function createDoorControls(deps: Deps) {
   }
 
   function result(reply: Result) {
-    deps.status(reply.message);
-    settings.result(reply);
+    if (settings.result(reply)) return;
+    if (reply.action !== 'keypad_digit' && !(reply.action === 'update' && reply.ok)) deps.status(reply.message);
     const key = { structureId: reply.structureId, doorId: reply.doorId ?? '' };
     const matches = (value: typeof keypad) =>
       value?.structureId === key.structureId && value?.doorId === key.doorId;
     if (reply.keypadActive && !keypad && matches(pending) && reply.ok) {
-      const cancel = () => {
-        deps.send({ type: 'door_action', action: 'keypad_cancel', ...key });
-        close();
-      };
-      const box = modal('Door keypad', cancel);
+      close();
       keypad = key;
-      const input = pinInput();
-      field(box, 'Four-digit PIN to ' + (reply.keypadAction ?? 'unlock'), input);
-      button(box, 'Cancel', cancel);
-      function resetIdle() {
-        clearTimeout(idleTimer);
-        idleTimer = setTimeout(() => {
-          cancel();
-          deps.status('Keypad timed out.');
-        }, 10_000);
-      }
-      let sent = '';
-      input.oninput = () => {
-        const value = input.value;
-        if (!value.startsWith(sent) || !/^\d{0,4}$/.test(value)) {
-          input.value = sent;
-          return;
-        }
-        const session = audioSession;
-        for (const digit of value.slice(sent.length)) {
-          digitSounds = digitSounds.then(async () => {
-            if (session === audioSession) await deps.keypadSound('keypad').catch(() => undefined);
-          });
-          deps.send({ type: 'door_action', action: 'keypad_digit', ...key, digit });
-        }
-        sent = value;
-        if (sent.length === 4 && !submitted) {
-          input.readOnly = submitted = true;
-          digitSounds = digitSounds.then(() => new Promise<void>((resolve) => setTimeout(resolve, 300)));
-        }
-        resetIdle();
-      };
-      box.showModal();
-      input.focus();
+      keypadAction = reply.keypadAction ?? 'unlock';
+      deps.setMode('doorKeypad');
+      deps.focusGrid();
       resetIdle();
     } else if (!reply.keypadActive && (matches(keypad) || matches(pending))) {
       if (matches(keypad) && submitted && reply.action === 'keypad_digit') {
@@ -255,5 +215,19 @@ export function createDoorControls(deps: Deps) {
       }
     }
   }
-  return { edit, use, result, close, handleSettingsInput: settings.handleInput, getSettingsTextEntry: settings.getTextEntry, setSettingsText: settings.setText, isSecretSettingsEdit: settings.isSecretEdit };
+  return {
+    edit, use, result, close, handleKeypadInput, setKeypadText,
+    getKeypadTextEntry: (): MobileTextEntry | null => keypad ? {
+      label: 'Four-digit PIN to ' + keypadAction,
+      value: digits,
+      maxLength: 4,
+      inputMode: 'numeric',
+      secret: true,
+      submitLabel: 'Enter',
+    } : null,
+    handleSettingsInput: settings.handleInput,
+    getSettingsTextEntry: settings.getTextEntry,
+    setSettingsText: settings.setText,
+    isSecretSettingsEdit: settings.isSecretEdit,
+  };
 }

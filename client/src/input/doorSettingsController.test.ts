@@ -22,6 +22,7 @@ function setup(keypad = true) {
   const send = vi.fn();
   const choose = vi.fn();
   const status = vi.fn();
+  const keypadSound = vi.fn().mockResolvedValue(undefined);
   const back = vi.fn();
   const textState = { nicknameInput: '', cursorPos: 0 };
   const edit = vi.fn((code: string, value: string, maxLength: number) => {
@@ -43,6 +44,7 @@ function setup(keypad = true) {
     status,
     cue: vi.fn(),
     blip: vi.fn(),
+    keypadSound,
     getWall: () => wall,
     setMode: (next) => {
       mode = next;
@@ -60,7 +62,7 @@ function setup(keypad = true) {
       message: ok ? 'Updated.' : 'The door changed. Try again.',
       keypadActive: false,
     });
-  return { door, wall, edit, controller, send, choose, status, back, key, reply, mode: () => mode };
+  return { door, wall, edit, controller, send, choose, status, keypadSound, back, key, reply, mode: () => mode };
 }
 
 describe('native door settings', () => {
@@ -96,6 +98,21 @@ describe('native door settings', () => {
     expect(test.send).toHaveBeenLastCalledWith(expect.objectContaining({ keypadSides: 'positive' }));
   });
 
+  it('announces just the confirmed property value when adjusting with arrows', () => {
+    const test = setup();
+    for (let i = 0; i < 5; i++) test.key('ArrowDown');
+    test.status.mockClear();
+    test.key('ArrowRight');
+    test.key('ArrowRight');
+    expect(test.status).not.toHaveBeenCalled();
+    test.door.unlockTimeoutSeconds = 1;
+    test.reply();
+    expect(test.status.mock.calls).toEqual([['Unlock timeout, 1 second']]);
+    test.key('ArrowRight');
+    test.reply(false);
+    expect(test.status).toHaveBeenLastCalledWith('The door changed. Try again.');
+  });
+
   it('delegates public editing shortcuts to the shared text editor', () => {
     const test = setup();
     test.key('Enter');
@@ -116,14 +133,15 @@ describe('native door settings', () => {
     expect(test.send).toHaveBeenCalledTimes(1);
   });
 
-  it('requires and confirms a private four-digit PIN before enabling keypad mode', () => {
+  it('requires and confirms a private four-digit PIN before enabling keypad mode', async () => {
     const test = setup(false);
     test.key('ArrowDown');
     test.key('ArrowRight');
     expect(test.mode()).toBe('doorSettingsEdit');
     expect(test.send).not.toHaveBeenCalled();
+    test.status.mockClear();
     for (const digit of '0042') test.key('Digit' + digit, digit);
-    expect(test.status.mock.calls.flat().join(' ')).not.toContain('0042');
+    expect(test.status).not.toHaveBeenCalled();
     expect(test.controller.getTextEntry()).toMatchObject({
       secret: true,
       inputMode: 'numeric',
@@ -138,6 +156,7 @@ describe('native door settings', () => {
       expect.objectContaining({ unlockMode: 'keypad', pin: '0042' }),
     );
     expect(test.controller.getTextEntry()).toBeNull();
+    await vi.waitFor(() => expect(test.keypadSound.mock.calls.flat()).toEqual(Array(8).fill('keypad')));
   });
 
   it('discards mismatched and cancelled PIN edits without sending them', () => {

@@ -636,7 +636,7 @@ class WallDoor(BaseModel):
     unlockMode: Literal["none", "keypad"] = "none"
     keypadSides: Literal["both", "negative", "positive"] = "both"
     pinRequiredFor: Literal["unlock", "lock", "both"] = "unlock"
-    unlockTimeoutSeconds: StrictInt = Field(default=0, ge=0, le=300)
+    unlockTimeoutSeconds: StrictInt = Field(default=10, ge=0, le=300)
     unlockDeadlineMs: StrictInt | None = None
     hasPin: bool = False
     revision: StrictInt = Field(default=0, ge=0)

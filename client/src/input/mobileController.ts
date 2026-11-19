@@ -284,6 +284,8 @@ export function setupMobileControls(deps: MobileControllerDeps): MobileControlle
 
   function commitTextValue(): void {
     deps.setTextEntry(deps.dom.textInput.value, deps.dom.textInput.selectionStart ?? deps.dom.textInput.value.length);
+    const accepted = deps.getTextEntry();
+    if (accepted && deps.dom.textInput.value !== accepted.value) deps.dom.textInput.value = accepted.value;
   }
 
   deps.dom.textInput.addEventListener('input', commitTextValue);

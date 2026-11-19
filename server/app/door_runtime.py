@@ -367,6 +367,7 @@ class DoorRuntime:
         else:
             message = "Door saved."
             was_keypad = door.unlockMode == "keypad"
+            had_pin = door.hasPin
             if packet.pin is not None and (
                 packet.pin
                 and (
@@ -393,6 +394,12 @@ class DoorRuntime:
                     "Set a four-digit PIN before enabling keypad mode."
                 )
             if door.unlockMode == "keypad" and not was_keypad:
+                if (
+                    not had_pin
+                    and door.unlockTimeoutSeconds == 0
+                    and packet.unlockTimeoutSeconds is None
+                ):
+                    door.unlockTimeoutSeconds = 10
                 door.isLocked = True
                 door.unlockDeadlineMs = None
                 message = "Keypad enabled. Door locked."

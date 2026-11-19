@@ -17,6 +17,7 @@ type Deps = {
   getWall: (id: string) => WallStructure | undefined;
   cue: (success: boolean) => void;
   blip: () => void;
+  keypadSound: (name: 'keypad' | 'keypad_good' | 'keypad_bad') => Promise<void>;
   textState: { nicknameInput: string; cursorPos: number };
   applyTextInputEdit: (
     code: string,
@@ -39,6 +40,12 @@ export function createDoorSettingsController(deps: Deps) {
   let newPin = '';
   let enableKeypad = false;
   let waiting = false;
+  let digitSounds = Promise.resolve();
+
+  function beep(count = 1) {
+    for (let i = 0; i < count; i++)
+      digitSounds = digitSounds.then(() => deps.keypadSound('keypad')).catch(() => undefined);
+  }
 
   function door(): WallDoor | undefined {
     return (
@@ -83,7 +90,7 @@ export function createDoorSettingsController(deps: Deps) {
         },
         {
           id: 'unlockTimeoutSeconds',
-          label: `Unlock timeout, ${current.unlockTimeoutSeconds === 0 ? 'Stays unlocked' : current.unlockTimeoutSeconds + ' seconds'}`,
+          label: `Unlock timeout, ${current.unlockTimeoutSeconds === 0 ? 'Stays unlocked' : current.unlockTimeoutSeconds === 1 ? '1 second' : current.unlockTimeoutSeconds + ' seconds'}`,
         },
       );
     return result;
@@ -132,8 +139,8 @@ export function createDoorSettingsController(deps: Deps) {
       revision: current.revision,
       ...update,
     });
-    menu();
-    deps.status('Updating door.');
+    clearInput();
+    deps.setMode('doorSettings');
   }
 
   function beginEdit(property: Property | 'confirmPin', value = '') {
@@ -173,10 +180,7 @@ export function createDoorSettingsController(deps: Deps) {
       back();
       return;
     }
-    if (waiting) {
-      deps.status('Waiting for the door update.');
-      return;
-    }
+    if (waiting) return;
     const rows = entries();
     const current = door();
     if (!current || !rows.length) {
@@ -292,12 +296,12 @@ export function createDoorSettingsController(deps: Deps) {
       }
       replace = false;
       const result = applyTextInput(mapTextInputKey(code, key), text, cursor, 4);
+      if (/^\d$/.test(key) && result.newString.length > text.length)
+        beep();
       text = result.newString;
       cursor = result.newCursorPos;
     }
-    deps.status(
-      editing === 'pin' || editing === 'confirmPin' ? `${text.length} of 4 digits entered.` : text || 'Empty',
-    );
+    if (editing !== 'pin' && editing !== 'confirmPin') deps.status(text || 'Empty');
   }
 
   return {
@@ -319,10 +323,15 @@ export function createDoorSettingsController(deps: Deps) {
         reply.structureId !== selection.wallId ||
         reply.doorId !== selection.doorId
       )
-        return;
+        return false;
       waiting = false;
-      menu();
-      deps.status(`${reply.message} ${entries()[index]?.label ?? ''}`.trim());
+      const rows = entries();
+      if (!rows.length) menu();
+      else {
+        index = Math.min(index, rows.length - 1);
+        deps.status(reply.ok ? rows[index].label : reply.message);
+      }
+      return true;
     },
     getTextEntry(): MobileTextEntry | null {
       if (!editing) return null;
@@ -344,6 +353,11 @@ export function createDoorSettingsController(deps: Deps) {
       };
     },
     setText(value: string, position: number) {
+      if (editing === 'pin' || editing === 'confirmPin') {
+        if (!/^\d{0,4}$/.test(value)) return;
+        const added = Math.max(0, value.length - text.length);
+        beep(added);
+      }
       text = value;
       cursor = position;
       replace = false;

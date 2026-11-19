@@ -190,6 +190,60 @@ async def test_pin_requirement_for_each_manual_operation(door_world, policy):
 
 
 @pytest.mark.asyncio
+async def test_keypad_defaults_to_relocking_after_ten_seconds(door_world, monkeypatch):
+    world, owner, _, wall_id = door_world
+    now = [1_000_000]
+    monkeypatch.setattr(world.server.door_runtime, "now_ms", lambda: now[0])
+    door_id = await add(door_world, pin="0042")
+    assert door(world, wall_id, door_id).unlockTimeoutSeconds == 10
+    await action(world, owner, wall_id, "unlock", doorId=door_id)
+    assert (await pin(world, owner, wall_id, door_id)).ok
+    assert door(world, wall_id, door_id).unlockDeadlineMs == now[0] + 10_000
+    now[0] += 9_999
+    await world.server.door_runtime.expire()
+    assert not door(world, wall_id, door_id).isLocked
+    now[0] += 1
+    await world.server.door_runtime.expire()
+    assert door(world, wall_id, door_id).isLocked
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("seconds", [None, 0, 30])
+async def test_first_keypad_activation_defaults_legacy_door_timeout(
+    door_world, seconds
+):
+    world, owner, _, wall_id = door_world
+    door_id = await add(door_world, unlockTimeoutSeconds=0)
+    options = {} if seconds is None else {"unlockTimeoutSeconds": seconds}
+    result = await action(
+        world, owner, wall_id, "update", doorId=door_id, pin="0042", **options
+    )
+    assert result.ok
+    assert door(world, wall_id, door_id).unlockTimeoutSeconds == (
+        10 if seconds is None else seconds
+    )
+
+
+@pytest.mark.asyncio
+async def test_keypad_pin_change_and_reactivation_preserve_zero_timeout(door_world):
+    world, owner, _, wall_id = door_world
+    door_id = await add(door_world, pin="0042", unlockTimeoutSeconds=0)
+    assert (
+        await action(world, owner, wall_id, "update", doorId=door_id, pin="1234")
+    ).ok
+    assert door(world, wall_id, door_id).unlockTimeoutSeconds == 0
+    assert (
+        await action(world, owner, wall_id, "update", doorId=door_id, unlockMode="none")
+    ).ok
+    assert (
+        await action(
+            world, owner, wall_id, "update", doorId=door_id, unlockMode="keypad"
+        )
+    ).ok
+    assert door(world, wall_id, door_id).unlockTimeoutSeconds == 0
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("seconds", [0, 1, 300])
 async def test_deadline_relocks_without_closing_and_survives_restart(
     door_world, monkeypatch, seconds

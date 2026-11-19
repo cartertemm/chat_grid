@@ -8,6 +8,7 @@ import {
   wallAcousticMixBetween,
 } from '../state/structureGeometry';
 import type { WallStructure } from '../state/gameState';
+import type { OptionSelectorRequest } from './optionSelector';
 
 const wall: WallStructure = {
   id: 'w',
@@ -47,6 +48,39 @@ afterEach(() => {
 });
 
 describe('door controls', () => {
+  it('announces the adjusted property once and suppresses save acknowledgements', () => {
+    const status = vi.fn();
+    const choose = vi.fn<(request: OptionSelectorRequest) => void>();
+    const edited = { ...wall, doors: wall.doors!.map((door) => ({ ...door })) };
+    const controls = createDoorControls({
+      send: vi.fn(), blip: vi.fn(), textState: { nicknameInput: '', cursorPos: 0 },
+      applyTextInputEdit: vi.fn(), setReplaceTextOnNextType: vi.fn(), setMode: vi.fn(),
+      getWall: () => edited, choose, confirm: vi.fn(), status, normal: vi.fn(),
+      focusGrid: vi.fn(), gridSize: () => 41, cue: vi.fn(),
+      keypadSound: vi.fn().mockResolvedValue(undefined),
+    });
+    controls.edit(edited, vi.fn());
+    choose.mock.lastCall![0].onSelect('d');
+    choose.mock.lastCall![0].onSelect('settings');
+    controls.handleSettingsInput('doorSettings', 'ArrowDown', 'ArrowDown');
+    status.mockClear();
+    controls.handleSettingsInput('doorSettings', 'ArrowLeft', 'ArrowLeft');
+    expect(status).not.toHaveBeenCalled();
+    edited.doors![0].unlockMode = 'none';
+    const reply = {
+      type: 'door_action_result', action: 'update', ok: true,
+      message: 'Door saved.', structureId: 'w', doorId: 'd', keypadActive: false,
+    } as const;
+    controls.result(reply);
+    expect(status.mock.calls.flat()).toEqual(['Unlock mode, None']);
+    status.mockClear();
+    controls.close();
+    controls.result(reply);
+    expect(status).not.toHaveBeenCalled();
+    controls.result({ ...reply, ok: false, message: 'The door changed. Try again.' });
+    expect(status).toHaveBeenLastCalledWith('The door changed. Try again.');
+  });
+
   it('uses the approach side, movement state and acoustics of the selected edge', () => {
     const [protectedSide] = adjacentDoors([wall], 1, 1, 0);
     expect(protectedSide).toMatchObject({ direction: 'north', freeSide: false });
@@ -65,10 +99,8 @@ describe('door controls', () => {
   it.each([true, false])('plays the server result after four beeps and a pause (accepted: %s)', async (ok) => {
     vi.useFakeTimers();
     const keypadSound = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperties(HTMLDialogElement.prototype, {
-      showModal: { configurable: true, value: vi.fn() },
-      close: { configurable: true, value: vi.fn() },
-    });
+    const status = vi.fn();
+    const setMode = vi.fn();
     const send = vi.fn();
     const controls = createDoorControls({
       send,
@@ -76,11 +108,11 @@ describe('door controls', () => {
       textState: { nicknameInput: '', cursorPos: 0 },
       applyTextInputEdit: vi.fn(),
       setReplaceTextOnNextType: vi.fn(),
-      setMode: vi.fn(),
+      setMode,
       getWall: () => wall,
       choose: vi.fn(),
       confirm: vi.fn(),
-      status: vi.fn(),
+      status,
       normal: vi.fn(),
       focusGrid: vi.fn(),
       gridSize: () => 41,
@@ -100,13 +132,18 @@ describe('door controls', () => {
       keypadAction: 'unlock',
     } as const;
     controls.result({ ...result, keypadActive: true });
-    const input = document.querySelector('input')!;
-    expect(input.type).toBe('password');
-    input.value = '0042';
-    input.dispatchEvent(new Event('input'));
+    expect(document.querySelector('dialog')).toBeNull();
+    expect(setMode).toHaveBeenLastCalledWith('doorKeypad');
+    expect(controls.getKeypadTextEntry()).toMatchObject({ secret: true, inputMode: 'numeric' });
+    status.mockClear();
+    controls.handleKeypadInput('Digit0', '0');
+    controls.handleKeypadInput('Digit0', '0');
+    controls.result({ ...result, action: 'keypad_digit', message: '2 of 4 digits.', keypadActive: true });
+    controls.setKeypadText('0042');
     expect(send.mock.calls.slice(1).map(([packet]) => packet.digit)).toEqual(['0', '0', '4', '2']);
     controls.result({ ...result, ok, action: 'keypad_digit', message: ok ? 'Unlocked.' : 'Incorrect PIN.', keypadActive: false });
-    expect(document.querySelector('dialog')).toBeNull();
+    expect(controls.getKeypadTextEntry()).toBeNull();
+    expect(status).not.toHaveBeenCalled();
     expect(send).toHaveBeenCalledTimes(5);
     await vi.advanceTimersByTimeAsync(299);
     expect(keypadSound.mock.calls.flat()).toEqual(Array(4).fill('keypad'));
