@@ -1,5 +1,9 @@
 # Item Schema
 
+## Independent duplication
+
+The server accepts an item_duplicate request naming a source item on the caller's square or held by the caller. It creates a new caller-owned item from the source's current saved properties and copies a piano's saved song to a fresh song ID. Each copy starts at revision 1 with fresh audit fields and no carrier or active runtime state. The item.create permission, ownership quota, placement checks and shared item creation/deletion budget apply. Ownership of the source grants no additional restriction on copying it.
+
 ## World Item (server-authoritative)
 
 ```json

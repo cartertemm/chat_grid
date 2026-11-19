@@ -94,6 +94,7 @@ from .models import (
     ClientPacket,
     FacingDeg,
     ItemAddPacket,
+    ItemDuplicatePacket,
     ItemDeletePacket,
     ItemUpdatePacket,
     LiveKitTokenPacket,
@@ -2650,11 +2651,14 @@ class SignalingServer:
             )
             return
 
-        if isinstance(packet, ItemAddPacket) and not self._consume_rate_limit(
-            client, "item_changes"
-        ):
+        if isinstance(
+            packet, (ItemAddPacket, ItemDuplicatePacket)
+        ) and not self._consume_rate_limit(client, "item_changes"):
             await self.item_runtime.send_result(
-                client, False, "add", ITEM_CHANGE_RATE_LIMIT_MESSAGE
+                client,
+                False,
+                "duplicate" if isinstance(packet, ItemDuplicatePacket) else "add",
+                ITEM_CHANGE_RATE_LIMIT_MESSAGE,
             )
             return
         if isinstance(packet, ItemDeletePacket) and not self._consume_rate_limit(

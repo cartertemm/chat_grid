@@ -1,5 +1,9 @@
 # Item Types
 
+## Duplicating items
+
+The item management menu offers Duplicate here to users with item creation permission for every item type on their square or held by them. The new item belongs to the caller and copies the source's current saved authoring properties. It has its own identity, initial revision, timestamps and independent saved piano recording. Carrying, active playback and elevator travel state start fresh. Editing or deleting either item leaves the other intact. The normal ownership cap, footprint validation and creation rate limit apply.
+
 This is behavior-focused documentation for item types and their defaults.
 
 ## Shared Item Behavior

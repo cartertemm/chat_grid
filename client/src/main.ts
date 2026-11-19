@@ -1879,7 +1879,8 @@ const onAppMessage = createOnMessageHandler({
   playWorldSoundSequence: (urls, source) => {
     void worldAudio.playSequence(urls, source);
   },
-  handleItemActionResultStatus: (message) => itemBehaviorRegistry.onActionResultStatus(message),
+  handleItemActionResultStatus: (message) => itemInteractionController.handleDuplicateResult(message)
+    || itemBehaviorRegistry.onActionResultStatus(message),
   handleItemBehaviorIncomingMessage: (message) => itemBehaviorRegistry.onIncomingMessage(message),
   handleItemBehaviorPeerLeft: (senderId) => itemBehaviorRegistry.onPeerLeft(senderId),
   TELEPORT_SOUND_URL,

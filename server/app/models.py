@@ -146,6 +146,13 @@ class ItemPickupPacket(BasePacket):
     itemId: str
 
 
+class ItemDuplicatePacket(BasePacket):
+    """Copy an accessible item into a new independently owned instance."""
+
+    type: Literal["item_duplicate"]
+    itemId: str
+
+
 class ItemDropPacket(BasePacket):
     type: Literal["item_drop"]
     itemId: str
@@ -372,6 +379,7 @@ ClientPacket = (
     | AdminUserDeletePacket
     | PingPacket
     | ItemAddPacket
+    | ItemDuplicatePacket
     | ItemPickupPacket
     | ItemDropPacket
     | ItemDeletePacket
@@ -692,6 +700,7 @@ class ItemActionResultPacket(BasePacket):
     ok: bool
     action: Literal[
         "add",
+        "duplicate",
         "pickup",
         "drop",
         "delete",
