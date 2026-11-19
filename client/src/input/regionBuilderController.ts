@@ -4,10 +4,6 @@ import type { NamedRegion } from '../state/gameState';
 import { containingRegions } from '../state/regions';
 import type { WorldBuilderDeps } from './worldBuilderController';
 
-const ROOT = [
-  { id: 'add', label: 'Add region here' },
-  { id: 'edit', label: 'Edit regions' },
-] as const;
 const ACTIONS = [
   { id: 'name', label: 'Name' },
   { id: 'startX', label: 'Start X' },
@@ -35,17 +31,16 @@ export function createRegionBuilderController(deps: WorldBuilderDeps, onBack: ()
     return false;
   }
 
-  function open(): void {
+  function requestAdd(): void {
     if (!allowed()) return;
-    index = 0;
-    deps.state.mode = 'worldBuilderRegionRoot';
-    deps.announceMenuEntry('Regions', ROOT[0].label);
+    deps.send({ type: 'region_add' });
+    deps.state.mode = 'normal';
   }
 
   function current(): NamedRegion | null {
     const region = selectedId ? deps.state.regions.get(selectedId) : undefined;
     if (region) return region;
-    open();
+    onBack();
     deps.updateStatus('Region no longer exists.');
     deps.cancel();
     return null;
@@ -63,6 +58,7 @@ export function createRegionBuilderController(deps: WorldBuilderDeps, onBack: ()
   }
 
   function openList(): void {
+    if (!allowed()) return;
     const player = deps.state.player;
     const containing = new Set(containingRegions(deps.state.regions.values(), player).map((region) => region.id));
     regions = [...deps.state.regions.values()]
@@ -70,7 +66,7 @@ export function createRegionBuilderController(deps: WorldBuilderDeps, onBack: ()
       .sort((left, right) => Number(containing.has(right.id)) - Number(containing.has(left.id))
         || left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
     if (!regions.length) {
-      open();
+      onBack();
       deps.updateStatus('No regions on this floor.');
       return;
     }
@@ -92,24 +88,13 @@ export function createRegionBuilderController(deps: WorldBuilderDeps, onBack: ()
     else if (code === 'Space') deps.updateStatus('Enter selects. Left and Right adjust bounds or slide a region by one square.');
   }
 
-  function handleRoot(code: string, key: string): void {
-    if (!allowed()) return;
-    handleMenu(code, key, ROOT, (entry) => {
-      if (entry.id === 'edit') openList();
-      else {
-        deps.send({ type: 'region_add' });
-        deps.state.mode = 'normal';
-      }
-    }, onBack);
-  }
-
   function handleList(code: string, key: string): void {
     if (!allowed()) return;
     handleMenu(code, key, regions.map((region) => ({ ...region, label: label(region) })), (entry) => {
       selectedId = entry.id;
       const region = current();
       if (region) openActions(region);
-    }, open);
+    }, onBack);
   }
 
   function handleActions(code: string, key: string): void {
@@ -174,7 +159,7 @@ export function createRegionBuilderController(deps: WorldBuilderDeps, onBack: ()
   }
 
   return {
-    open, handleRoot, handleList, handleActions, handleEdit,
+    requestAdd, openList, handleList, handleActions, handleEdit,
     handleActionResult(message: { ok: boolean; action: string; message: string; regionId?: string }) {
       deps.updateStatus(message.message);
       if (!message.ok) { deps.cancel(); return; }

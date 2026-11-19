@@ -1,12 +1,19 @@
 import type { DoorAction, IncomingMessage } from '../network/protocol';
-import type { WallDoor, WallStructure } from '../state/gameState';
+import type { WallStructure } from '../state/gameState';
 import type { OptionSelectorRequest } from './optionSelector';
 import type { ConfirmationRequest } from './confirmationController';
 import type { NearbyDoor } from '../state/structureGeometry';
+import { createDoorSettingsController } from './doorSettingsController';
+import type { GameMode } from '../state/gameState';
 
 type Result = Extract<IncomingMessage, { type: 'door_action_result' }>;
 type Deps = {
   send: (packet: DoorAction) => void;
+  setMode: (mode: GameMode) => void;
+  getWall: (id: string) => WallStructure | undefined;
+  textState: { nicknameInput: string; cursorPos: number };
+  applyTextInputEdit: (code: string, key: string, maxLength: number, ctrlKey?: boolean, allowReplaceOnNextType?: boolean) => void;
+  setReplaceTextOnNextType: (value: boolean) => void;
   choose: (request: OptionSelectorRequest) => void;
   confirm: (request: ConfirmationRequest) => void;
   status: (text: string) => void;
@@ -14,6 +21,7 @@ type Deps = {
   focusGrid: () => void;
   gridSize: () => number;
   cue: (success: boolean) => void;
+  blip: () => void;
   keypadSound: (name: 'keypad' | 'keypad_good' | 'keypad_bad') => Promise<void>;
 };
 
@@ -23,13 +31,6 @@ function field(parent: HTMLElement, title: string, control: HTMLInputElement | H
   label.append(control);
   parent.append(label);
   return control;
-}
-
-function select(options: [string, string][], current: string) {
-  const input = document.createElement('select');
-  for (const [value, label] of options) input.add(new Option(label, value));
-  input.value = current;
-  return input;
 }
 
 function pinInput() {
@@ -44,6 +45,7 @@ function pinInput() {
 
 /** Wall builder menus and the private, exclusive door keypad. */
 export function createDoorControls(deps: Deps) {
+  const settings = createDoorSettingsController(deps);
   let dialog: HTMLDialogElement | null = null;
   let keypad: { structureId: string; doorId: string } | null = null;
   let pending: { structureId: string; doorId: string } | null = null;
@@ -53,6 +55,7 @@ export function createDoorControls(deps: Deps) {
   let submitted = false;
 
   function close(keepResultAudio = false) {
+    settings.close();
     if (!keepResultAudio) audioSession++;
     digitSounds = Promise.resolve();
     submitted = false;
@@ -90,99 +93,6 @@ export function createDoorControls(deps: Deps) {
     node.textContent = label;
     node.onclick = () => action();
     parent.append(node);
-  }
-
-  function settings(wall: WallStructure, door: WallDoor) {
-    deps.normal();
-    const box = modal('Door settings', close);
-    const form = document.createElement('form');
-    box.append(form);
-    const name = document.createElement('input');
-    name.value = door.title;
-    name.maxLength = 80;
-    name.required = true;
-    field(form, 'Door name', name);
-    const mode = select(
-      [
-        ['none', 'None'],
-        ['keypad', 'Keypad'],
-      ],
-      door.unlockMode,
-    );
-    field(form, 'Unlock mode', mode);
-    const group = document.createElement('fieldset');
-    form.append(group);
-    const pin = pinInput();
-    field(group, door.hasPin ? 'New four-digit PIN (leave blank to keep)' : 'Four-digit PIN', pin);
-    const confirmPin = pinInput();
-    field(group, 'Confirm new PIN', confirmPin);
-    const horizontal = wall.orientation === 'horizontal';
-    const sides = select(
-      [
-        ['both', 'Both'],
-        ['negative', horizontal ? 'South' : 'West'],
-        ['positive', horizontal ? 'North' : 'East'],
-      ],
-      door.keypadSides,
-    );
-    field(group, 'Keypad sides', sides);
-    const policy = select(
-      [
-        ['unlock', 'Unlock'],
-        ['lock', 'Lock'],
-        ['both', 'Both'],
-      ],
-      door.pinRequiredFor,
-    );
-    field(group, 'Require PIN for', policy);
-    const timeout = document.createElement('input');
-    Object.assign(timeout, {
-      type: 'number',
-      min: '0',
-      max: '300',
-      step: '1',
-      required: true,
-      value: String(door.unlockTimeoutSeconds),
-    });
-    field(group, 'Unlock timeout in seconds (0 stays unlocked)', timeout);
-    function updateMode() {
-      group.hidden = group.disabled = mode.value !== 'keypad';
-      pin.required = !door.hasPin && !group.disabled;
-    }
-    mode.onchange = updateMode;
-    updateMode();
-    const save = document.createElement('button');
-    save.textContent = 'Save';
-    form.append(save);
-    button(form, 'Cancel', close);
-    form.onsubmit = (event) => {
-      event.preventDefault();
-      if (!group.disabled && pin.value !== confirmPin.value) {
-        confirmPin.setCustomValidity('PINs must match.');
-        confirmPin.reportValidity();
-        confirmPin.setCustomValidity('');
-        return;
-      }
-      const packet: DoorAction = {
-        type: 'door_action',
-        action: 'update',
-        structureId: wall.id,
-        doorId: door.id,
-        revision: door.revision,
-        title: name.value.trim(),
-        unlockMode: mode.value as WallDoor['unlockMode'],
-      };
-      if (!group.disabled) {
-        packet.keypadSides = sides.value as WallDoor['keypadSides'];
-        packet.pinRequiredFor = policy.value as WallDoor['pinRequiredFor'];
-        packet.unlockTimeoutSeconds = Number(timeout.value);
-        if (pin.value) packet.pin = pin.value;
-      }
-      deps.send(packet);
-      close();
-    };
-    box.showModal();
-    name.focus();
   }
 
   function edit(wall: WallStructure, back: () => void) {
@@ -240,7 +150,7 @@ export function createDoorControls(deps: Deps) {
           onCancel: back,
           onSelect(action) {
             if (action === 'settings') {
-              settings(wall, door);
+              settings.open(wall, door, () => edit(deps.getWall(wall.id) ?? wall, back));
               return;
             }
             deps.confirm({
@@ -287,6 +197,7 @@ export function createDoorControls(deps: Deps) {
 
   function result(reply: Result) {
     deps.status(reply.message);
+    settings.result(reply);
     const key = { structureId: reply.structureId, doorId: reply.doorId ?? '' };
     const matches = (value: typeof keypad) =>
       value?.structureId === key.structureId && value?.doorId === key.doorId;
@@ -344,5 +255,5 @@ export function createDoorControls(deps: Deps) {
       }
     }
   }
-  return { edit, use, result, close };
+  return { edit, use, result, close, handleSettingsInput: settings.handleInput, getSettingsTextEntry: settings.getTextEntry, setSettingsText: settings.setText, isSecretSettingsEdit: settings.isSecretEdit };
 }

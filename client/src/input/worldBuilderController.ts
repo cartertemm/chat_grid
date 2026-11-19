@@ -40,7 +40,8 @@ const ROOT_ACTIONS = [
   { id: 'edit', label: 'Edit walls', tooltip: 'Choose a wall on this floor to resize, edit, or delete.' },
   { id: 'addAmbiance', label: 'Add ambiance', tooltip: 'Create a one-square ambiance at your current position.' },
   { id: 'editAmbiances', label: 'Edit ambiances', tooltip: 'Choose an ambiance on this floor to resize, edit, or delete.' },
-  { id: 'regions', label: 'Regions', tooltip: 'Create or edit named areas on this floor.' },
+  { id: 'addRegion', label: 'Add region', tooltip: 'Create a one-square named region at your current position.' },
+  { id: 'editRegions', label: 'Edit regions', tooltip: 'Choose a named region on this floor to edit.' },
 ] as const;
 const DIRECTIONS = [
   { id: 'north', label: 'North', tooltip: 'Place the wall along the north edge of your current square.' },
@@ -228,8 +229,12 @@ export function createWorldBuilderController(deps: WorldBuilderDeps) {
 
   function handleRoot(code: string, key: string): void {
     handleList(code, key, ROOT_ACTIONS, (entry) => {
-      if (entry === 'regions') {
-        regionBuilderController.open();
+      if (entry === 'addRegion') {
+        regionBuilderController.requestAdd();
+        return;
+      }
+      if (entry === 'editRegions') {
+        regionBuilderController.openList();
         return;
       }
       if (entry === 'add') {
@@ -554,7 +559,6 @@ export function createWorldBuilderController(deps: WorldBuilderDeps) {
     handleWallActions,
     handlePropertyList,
     handlePropertyEdit,
-    handleRegionRoot: regionBuilderController.handleRoot,
     handleRegionList: regionBuilderController.handleList,
     handleRegionActions: regionBuilderController.handleActions,
     handleRegionEdit: regionBuilderController.handleEdit,

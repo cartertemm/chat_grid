@@ -652,6 +652,12 @@ const confirmationController = createConfirmationController({
   cancel: () => audio.sfxUiCancel(),
 });
 const doorControls = createDoorControls({
+  blip: () => audio.sfxUiBlip(),
+  textState: state,
+  applyTextInputEdit,
+  setReplaceTextOnNextType: (value) => { replaceTextOnNextType = value; },
+  setMode: (mode) => { state.mode = mode; },
+  getWall: (id) => state.structures.get(id),
   send: (message) => signaling.send(message),
   choose: (request) => optionSelector.open(request),
   confirm: (request) => confirmationController.open(request),
@@ -1239,6 +1245,7 @@ function secondaryUseItem(item: WorldItem): void {
 
 /** Returns the active text-input max length for the current UI mode, if applicable. */
 function textInputMaxLengthForMode(mode: typeof state.mode): number | null {
+  if (mode === 'doorSettingsEdit' && !doorControls.isSecretSettingsEdit()) return doorControls.getSettingsTextEntry()?.maxLength ?? null;
   if (mode === 'nickname') return NICKNAME_MAX_LENGTH;
   if (mode === 'chat') return 500;
   if (mode === 'itemPropertyEdit') return 500;
@@ -1266,6 +1273,7 @@ function pasteIntoActiveTextInput(raw: string): boolean {
 /** Whether the current mode uses the shared single-line text editing pipeline. */
 function isTextEditingMode(mode: typeof state.mode): boolean {
   return (
+    (mode === 'doorSettingsEdit' && !doorControls.isSecretSettingsEdit()) ||
     mode === 'nickname' ||
     mode === 'chat' ||
     mode === 'itemPropertyEdit' ||
@@ -1893,8 +1901,7 @@ const onAppMessage = createOnMessageHandler({
   playWorldSoundSequence: (urls, source) => {
     void worldAudio.playSequence(urls, source);
   },
-  handleItemActionResultStatus: (message) => itemInteractionController.handleDuplicateResult(message)
-    || itemBehaviorRegistry.onActionResultStatus(message),
+  handleItemActionResultStatus: (message) => itemBehaviorRegistry.onActionResultStatus(message),
   handleItemBehaviorIncomingMessage: (message) => itemBehaviorRegistry.onIncomingMessage(message),
   handleItemBehaviorPeerLeft: (senderId) => itemBehaviorRegistry.onPeerLeft(senderId),
   TELEPORT_SOUND_URL,
@@ -2993,6 +3000,10 @@ function handleNicknameModeInput(code: string, key: string, ctrlKey: boolean): v
 }
 
 function handleModeInput(input: ModeInput): void {
+  if (state.mode === 'doorSettings' || state.mode === 'doorSettingsEdit') {
+    doorControls.handleSettingsInput(state.mode, input.code, input.key, input.ctrlKey);
+    return;
+  }
   if (itemBehaviorRegistry.handleModeInput(state.mode, input)) {
     return;
   }
@@ -3035,7 +3046,6 @@ function handleModeInput(input: ModeInput): void {
       worldBuilderWallList: ({ code: currentCode, key: currentKey }) => worldBuilderController.handleWallList(currentCode, currentKey),
       worldBuilderWallActions: ({ code: currentCode, key: currentKey }) => worldBuilderController.handleWallActions(currentCode, currentKey),
       worldBuilderPropertyList: ({ code: currentCode, key: currentKey }) => worldBuilderController.handlePropertyList(currentCode, currentKey),
-      worldBuilderRegionRoot: ({ code, key }) => worldBuilderController.handleRegionRoot(code, key),
       worldBuilderRegionList: ({ code, key }) => worldBuilderController.handleRegionList(code, key),
       worldBuilderRegionActions: ({ code, key }) => worldBuilderController.handleRegionActions(code, key),
       worldBuilderRegionEdit: ({ code, key, ctrlKey }) => worldBuilderController.handleRegionEdit(code, key, ctrlKey),
@@ -3077,6 +3087,7 @@ function closeSettings(): void {
 }
 
 function getMobileTextEntry(): MobileTextEntry | null {
+  if (state.mode === 'doorSettingsEdit') return doorControls.getSettingsTextEntry();
   const maxLength = textInputMaxLengthForMode(state.mode);
   if (maxLength === null) return null;
   if (state.mode === 'chat') {
@@ -3197,6 +3208,10 @@ mobileControls = setupMobileControls({
   toggleMute,
   getTextEntry: getMobileTextEntry,
   setTextEntry: (value, cursor) => {
+    if (state.mode === 'doorSettingsEdit') {
+      doorControls.setSettingsText(value, cursor);
+      return;
+    }
     state.nicknameInput = value;
     state.cursorPos = cursor;
     replaceTextOnNextType = false;

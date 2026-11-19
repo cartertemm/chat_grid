@@ -817,6 +817,7 @@ class WorldSoundPacket(BasePacket):
     z: int
     acousticZoneId: str
     range: int | None = None
+    doorOrientation: Literal["horizontal", "vertical"] | None = None
 
 
 class ItemClockAnnouncePacket(BasePacket):

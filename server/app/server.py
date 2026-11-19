@@ -366,7 +366,7 @@ class SignalingServer:
     async def _play_door_sound(
         self, wall: WallStructure, door: WallDoor, opened: bool
     ) -> None:
-        """Emit one existing movement sample from the doorway's positive tile."""
+        """Emit a doorway sample that each listener hears from their adjacent side."""
 
         await self.delivery.broadcast(
             WorldSoundPacket(
@@ -377,6 +377,7 @@ class SignalingServer:
                 y=wall.startY + (door.offset if wall.orientation == "vertical" else 0),
                 z=wall.floorZ,
                 acousticZoneId=floor_acoustic_zone_id(wall.floorZ),
+                doorOrientation=wall.orientation,
             )
         )
 

@@ -10,6 +10,7 @@ export const WORLD_FOOTSTEP_GAIN = 0.7;
 export type WorldSoundSource = SpatialAudioPosition & {
   gain?: number;
   range?: number;
+  doorOrientation?: 'horizontal' | 'vertical';
 };
 
 type ListenerPositionGetter = () => SpatialAudioPosition;
@@ -31,10 +32,11 @@ export class WorldAudioRouter {
   }
 
   playSample(url: string, source: WorldSoundSource): void {
-    if (!url || !this.canRoute(source)) return;
+    const audibleSource = this.sourceOnListenerSide(source);
+    if (!url || !this.canRoute(audibleSource)) return;
     void this.audio.playSpatialSample(
       url,
-      source,
+      audibleSource,
       this.getListenerPosition(),
       source.gain ?? 1,
       source.range ?? HEARING_RADIUS,
@@ -47,12 +49,23 @@ export class WorldAudioRouter {
       if (!url || !this.canRoute(source)) return;
       await this.audio.playSpatialSampleAndWait(
         url,
-        source,
+        this.sourceOnListenerSide(source),
         this.getListenerPosition(),
         source.gain ?? 1,
         source.range ?? HEARING_RADIUS,
       );
     }
+  }
+
+  private sourceOnListenerSide(source: WorldSoundSource): WorldSoundSource {
+    const listener = this.getListenerPosition();
+    if (source.doorOrientation === 'horizontal' && listener.y < source.y) {
+      return { ...source, y: source.y - 1 };
+    }
+    if (source.doorOrientation === 'vertical' && listener.x < source.x) {
+      return { ...source, x: source.x - 1 };
+    }
+    return source;
   }
 
   private canRoute(source: WorldSoundSource): boolean {
