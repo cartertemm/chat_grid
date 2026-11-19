@@ -55,6 +55,16 @@ export const ambianceRegionSchema = z.object({
   fadeDistance: z.number().finite().min(0).max(100),
 });
 
+export const namedRegionSchema = z.object({
+  id: z.string(),
+  name: z.string().min(1).max(100),
+  floorZ: z.number().int(),
+  startX: z.number().int().nonnegative(),
+  startY: z.number().int().nonnegative(),
+  endX: z.number().int().nonnegative(),
+  endY: z.number().int().nonnegative(),
+});
+
 export const ambianceTypeSchema = z.object({ id: z.string(), title: z.string(), url: z.string() });
 
 const doorOperation = z.enum(['add','update','remove','open','close','lock','unlock','keypad_begin','keypad_digit','keypad_cancel']);
@@ -126,6 +136,7 @@ export const welcomeMessageSchema = z.object({
   items: z.array(itemSchema).optional(),
   structures: z.array(wallStructureSchema).optional(),
   ambiances: z.array(ambianceRegionSchema).optional(),
+  regions: z.array(namedRegionSchema).optional(),
   worldConfig: z
     .object({
       gridSize: z.number().int().positive(),
@@ -346,7 +357,7 @@ export const itemRemoveSchema = z.object({
 export const itemActionResultSchema = z.object({
   type: z.literal('item_action_result'),
   ok: z.boolean(),
-  action: z.enum(['add', 'pickup', 'drop', 'delete', 'transfer', 'hand', 'use', 'secondary_use', 'update']),
+  action: z.enum(['add', 'duplicate', 'pickup', 'drop', 'delete', 'transfer', 'hand', 'use', 'secondary_use', 'update']),
   message: z.string(),
   itemId: z.string().optional(),
 });
@@ -520,6 +531,22 @@ export const ambianceActionResultSchema = z.object({
   ambianceId: z.string().optional(),
 });
 
+export const regionUpsertSchema = z.object({
+  type: z.literal('region_upsert'),
+  region: namedRegionSchema,
+});
+export const regionRemoveSchema = z.object({
+  type: z.literal('region_remove'),
+  regionId: z.string(),
+});
+export const regionActionResultSchema = z.object({
+  type: z.literal('region_action_result'),
+  ok: z.boolean(),
+  action: z.enum(['add', 'resize', 'slide', 'update', 'delete']),
+  message: z.string(),
+  regionId: z.string().optional(),
+});
+
 export const worldSoundSchema = z.object({
   type: z.literal('world_sound'),
   sound: z.string(),
@@ -564,6 +591,9 @@ export const incomingMessageSchema = z.discriminatedUnion('type', [
   ambianceUpsertSchema,
   ambianceRemoveSchema,
   ambianceActionResultSchema,
+  regionUpsertSchema,
+  regionRemoveSchema,
+  regionActionResultSchema,
   worldSoundSchema,
 ]);
 
@@ -603,12 +633,18 @@ export type OutgoingMessage =
   | { type: 'item_pickup'; itemId: string }
   | { type: 'item_drop'; itemId: string; x: number; y: number; z: number }
   | { type: 'item_delete'; itemId: string }
+  | { type: 'item_duplicate'; itemId: string }
   | { type: 'item_transfer_targets'; itemId: string }
   | { type: 'item_transfer'; itemId: string; targetUserId: string }
   | { type: 'item_hand_targets'; itemId: string }
   | { type: 'item_hand'; itemId: string; targetUserId: string }
   | { type: 'item_use'; itemId: string }
   | { type: 'item_secondary_use'; itemId: string }
+  | { type: 'region_add' }
+  | { type: 'region_update'; regionId: string; name?: string }
+  | { type: 'region_resize'; regionId: string; edge: 'west' | 'east' | 'south' | 'north'; delta: -1 | 1 }
+  | { type: 'region_slide'; regionId: string; axis: 'x' | 'y'; delta: -1 | 1 }
+  | { type: 'region_delete'; regionId: string }
   | { type: 'ambiance_add' }
   | { type: 'ambiance_update'; ambianceId: string; name?: string; soundId?: string; volume?: number; fadeDistance?: number }
   | { type: 'ambiance_resize'; ambianceId: string; edge: 'west' | 'east' | 'south' | 'north'; delta: -1 | 1 }

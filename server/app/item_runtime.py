@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
+from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Literal, Protocol
 
@@ -36,6 +38,7 @@ from .models import (
     ItemAddPacket,
     ItemDeletePacket,
     ItemDropPacket,
+    ItemDuplicatePacket,
     ItemHandPacket,
     ItemHandTargetsPacket,
     ItemHandTargetsResultPacket,
@@ -255,6 +258,9 @@ class ItemRuntime:
         if isinstance(packet, ItemAddPacket):
             await self._handle_add(client, packet)
             return True
+        if isinstance(packet, ItemDuplicatePacket):
+            await self._handle_duplicate(client, packet)
+            return True
         if isinstance(packet, ItemPickupPacket):
             await self._handle_pickup(client, packet)
             return True
@@ -357,6 +363,95 @@ class ItemRuntime:
             item.id,
         )
         return
+
+    async def _handle_duplicate(
+        self, client: ClientConnection, packet: ItemDuplicatePacket
+    ) -> None:
+        """Copy an item on the caller's square without copying runtime state."""
+
+        source = self.items.get(packet.itemId)
+        if source is None:
+            await self.send_result(client, False, "duplicate", "Item not found.")
+            return
+        if not self.client_has_permission(client, "item.create"):
+            await self.send_result(
+                client, False, "duplicate", "Not authorized to create items."
+            )
+            return
+        if source.carrierId != client.id and (
+            source.carrierId is not None
+            or not self.item_is_on_client_square(source, client)
+        ):
+            await self.send_result(
+                client, False, "duplicate", "Item is not available on your square."
+            )
+            return
+        max_items = self.host.max_items_per_user
+        if client.user_id and self._owned_item_count(client.user_id) >= max_items:
+            await self.send_result(
+                client,
+                False,
+                "duplicate",
+                f"You already own the maximum of {max_items} items. Delete one before placing another.",
+            )
+            return
+        item = self.item_service.default_item(client, source.type)
+        item.title = source.title
+        item.params = deepcopy(source.params)
+        if item.type == "radio_station":
+            item.params.update(stationName="", nowPlaying="")
+        if item.type == "elevator":
+            item.z = 0
+            item.params.update(
+                currentZ=client.z,
+                targetZ=None,
+                queuedZ=None,
+                departOnCloseZ=None,
+                state="idle",
+                doorOpen=False,
+            )
+        try:
+            item.params = get_item_type_handler(item.type).validate_update(
+                item, deepcopy(item.params)
+            )
+        except ValueError as exc:
+            await self.send_result(client, False, "duplicate", str(exc))
+            return
+        if not self._item_footprint_in_bounds(item):
+            await self.send_result(
+                client,
+                False,
+                "duplicate",
+                "The item footprint does not fit at this position.",
+            )
+            return
+        song = None
+        if item.type == "piano":
+            source_song_id = str(item.params.get("songId", ""))
+            song = deepcopy(self.item_service.piano_songs.get(source_song_id))
+            item.params["songId"] = str(uuid.uuid4()) if song is not None else ""
+        # Finish validation before publishing either the item or a new song.
+        if song is not None:
+            self.item_service.piano_songs[item.params["songId"]] = song
+            if not self.item_service.save_piano_songs():
+                self.item_service.piano_songs.pop(item.params["songId"], None)
+                await self.send_result(
+                    client,
+                    False,
+                    "duplicate",
+                    "Could not save the copied recording. Please try again.",
+                )
+                return
+        self.item_service.add_item(item)
+        self.request_state_save()
+        await self.broadcast_item(item)
+        await self.send_result(
+            client,
+            True,
+            "duplicate",
+            f"You duplicated {item.title} ({self._item_type_label(item)}) here. You own the copy.",
+            item.id,
+        )
 
     async def _handle_pickup(
         self, client: ClientConnection, packet: ItemPickupPacket
@@ -1511,6 +1606,7 @@ class ItemRuntime:
         ok: bool,
         action: Literal[
             "add",
+            "duplicate",
             "pickup",
             "drop",
             "delete",

@@ -1,5 +1,11 @@
 # Protocol Notes
 
+## Item duplication
+
+Send item_duplicate with itemId to duplicate an item available on the caller's square or held by the caller. The server broadcasts item_upsert for the independent caller-owned copy and replies with item_action_result, action duplicate, and the new itemId on success. The client uses that ID to select the new copy even when it overlaps the original. Failures create neither an item nor a saved song. Duplication uses the same creation rate budget as item_add and the ordinary ownership quota.
+
+Named regions use `region_add`, `region_update` (name), `region_resize` (one edge, delta -1/+1), `region_slide` (axis, delta -1/+1) and `region_delete`. The server gates mutations with `world.structure.edit`, publishes `region_upsert`/`region_remove`, then sends `region_action_result`. Each region contains `id`, `name`, `floorZ`, `startX`, `startY`, `endX` and `endY`. Bounds are inclusive, and overlapping rectangles are valid. Welcome includes the complete `regions` collection.
+
 This is a behavior guide for packet semantics beyond raw schemas.
 
 ## Direction

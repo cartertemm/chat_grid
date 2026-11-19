@@ -1,3 +1,4 @@
+import { containingRegions } from './state/regions';
 import './styles.css';
 import { resolveArrowMovement } from './input/movement';
 import { AudioEngine, type SpatialAudioPosition } from './audio/audioEngine';
@@ -1244,7 +1245,7 @@ function textInputMaxLengthForMode(mode: typeof state.mode): number | null {
   if (mode === 'micGainEdit') return 8;
   if (mode === 'adminRoleNameEdit') return 32;
   if (mode === 'worldBuilderPropertyEdit') return 200;
-  if (mode === 'worldBuilderAmbianceEdit') return 100;
+  if (mode === 'worldBuilderAmbianceEdit' || mode === 'worldBuilderRegionEdit') return 100;
   return null;
 }
 
@@ -1271,7 +1272,8 @@ function isTextEditingMode(mode: typeof state.mode): boolean {
     mode === 'micGainEdit' ||
     mode === 'adminRoleNameEdit' ||
     mode === 'worldBuilderPropertyEdit' ||
-    mode === 'worldBuilderAmbianceEdit'
+    mode === 'worldBuilderAmbianceEdit' ||
+    mode === 'worldBuilderRegionEdit'
   );
 }
 
@@ -1891,7 +1893,8 @@ const onAppMessage = createOnMessageHandler({
   playWorldSoundSequence: (urls, source) => {
     void worldAudio.playSequence(urls, source);
   },
-  handleItemActionResultStatus: (message) => itemBehaviorRegistry.onActionResultStatus(message),
+  handleItemActionResultStatus: (message) => itemInteractionController.handleDuplicateResult(message)
+    || itemBehaviorRegistry.onActionResultStatus(message),
   handleItemBehaviorIncomingMessage: (message) => itemBehaviorRegistry.onIncomingMessage(message),
   handleItemBehaviorPeerLeft: (senderId) => itemBehaviorRegistry.onPeerLeft(senderId),
   TELEPORT_SOUND_URL,
@@ -1924,6 +1927,7 @@ const onAppMessage = createOnMessageHandler({
   handleItemHandTargets,
   handleDoorResult: doorControls.result,
   handleStructureActionResult: (message) => worldBuilderController.handleActionResult(message),
+  handleRegionActionResult: (message) => worldBuilderController.handleRegionActionResult(message),
   handleAmbianceActionResult: (message) => worldBuilderController.handleAmbianceActionResult(message),
   handleTeleportTransition: (message) => teleportTransition.handle(message),
   connectToLiveKit: (url, token) => {
@@ -2118,8 +2122,10 @@ function speakCoordinatesCommand(): void {
     state.player.y,
     state.player.z,
   );
+  const names = containingRegions(state.regions.values(), state.player).map((region) => region.name);
+  const regionPhrase = names.length ? ` ${names.join(', ')}.` : '';
   const structurePhrase = adjacentWalls.length > 0 ? ` Structures: ${adjacentWalls.join(', ')}.` : '';
-  updateStatus(`${locationPhrase(state.player.x, state.player.y, state.player.z)}${structurePhrase}`);
+  updateStatus(`${locationPhrase(state.player.x, state.player.y, state.player.z)}${regionPhrase}${structurePhrase}`);
   audio.sfxUiBlip();
 }
 
@@ -3029,6 +3035,10 @@ function handleModeInput(input: ModeInput): void {
       worldBuilderWallList: ({ code: currentCode, key: currentKey }) => worldBuilderController.handleWallList(currentCode, currentKey),
       worldBuilderWallActions: ({ code: currentCode, key: currentKey }) => worldBuilderController.handleWallActions(currentCode, currentKey),
       worldBuilderPropertyList: ({ code: currentCode, key: currentKey }) => worldBuilderController.handlePropertyList(currentCode, currentKey),
+      worldBuilderRegionRoot: ({ code, key }) => worldBuilderController.handleRegionRoot(code, key),
+      worldBuilderRegionList: ({ code, key }) => worldBuilderController.handleRegionList(code, key),
+      worldBuilderRegionActions: ({ code, key }) => worldBuilderController.handleRegionActions(code, key),
+      worldBuilderRegionEdit: ({ code, key, ctrlKey }) => worldBuilderController.handleRegionEdit(code, key, ctrlKey),
       worldBuilderAmbianceList: ({ code, key }) => worldBuilderController.handleAmbianceList(code, key),
       worldBuilderAmbianceActions: ({ code, key }) => worldBuilderController.handleAmbianceActions(code, key),
       worldBuilderAmbianceEdit: ({ code, key, ctrlKey }) => worldBuilderController.handleAmbianceEdit(code, key, ctrlKey),
@@ -3087,6 +3097,9 @@ function getMobileTextEntry(): MobileTextEntry | null {
   }
   if (state.mode === 'micGainEdit') {
     return { label: 'Microphone gain', value: state.nicknameInput, maxLength, inputMode: 'decimal', submitLabel: 'Save' };
+  }
+  if (state.mode === 'worldBuilderRegionEdit') {
+    return { label: 'Region name', value: state.nicknameInput, maxLength, inputMode: 'text', submitLabel: 'Save' };
   }
   if (state.mode === 'worldBuilderAmbianceEdit') {
     const label = worldBuilderController.getEditingAmbiancePropertyLabel();

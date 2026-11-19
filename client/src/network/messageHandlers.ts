@@ -1,5 +1,5 @@
 import { type IncomingMessage } from './protocol';
-import { getFacingDirection, type AmbianceRegion, type AmbianceType, type StructurePreset, type WallStructure, type WorldItem } from '../state/gameState';
+import { getFacingDirection, type NamedRegion, type AmbianceRegion, type AmbianceType, type StructurePreset, type WallStructure, type WorldItem } from '../state/gameState';
 import { WORLD_FOOTSTEP_GAIN, type WorldSoundSource } from '../audio/worldAudio';
 
 /**
@@ -24,6 +24,7 @@ type MessageHandlerDeps = {
     items: Map<string, WorldItem>;
     structures: Map<string, WallStructure>;
     ambiances: Map<string, AmbianceRegion>;
+    regions: Map<string, NamedRegion>;
     mode: string;
     selectedItemId: string | null;
     itemPropertyKeys: string[];
@@ -84,6 +85,7 @@ type MessageHandlerDeps = {
   handleItemHandTargets: (message: Extract<IncomingMessage, { type: 'item_hand_targets' }>) => void;
   handleDoorResult?: (message: Extract<IncomingMessage, {type: 'door_action_result'}>) => void;
   handleStructureActionResult: (message: Extract<IncomingMessage, { type: 'structure_action_result' }>) => void;
+  handleRegionActionResult?: (message: Extract<IncomingMessage, { type: 'region_action_result' }>) => void;
   handleAmbianceActionResult: (message: Extract<IncomingMessage, { type: 'ambiance_action_result' }>) => void;
   handleTeleportTransition: (message: Extract<IncomingMessage, { type: 'teleport_transition' }>) => void;
   connectToLiveKit: (url: string, token: string) => void;
@@ -133,6 +135,15 @@ export function createOnMessageHandler(deps: MessageHandlerDeps): (message: Inco
       case 'structure_remove':
         deps.state.structures.delete(message.structureId);
         deps.refreshStructureGeometry();
+        break;
+      case 'region_action_result':
+        deps.handleRegionActionResult?.(message);
+        break;
+      case 'region_upsert':
+        deps.state.regions.set(message.region.id, message.region);
+        break;
+      case 'region_remove':
+        deps.state.regions.delete(message.regionId);
         break;
       case 'ambiance_action_result':
         deps.handleAmbianceActionResult(message);
@@ -192,6 +203,8 @@ export function createOnMessageHandler(deps: MessageHandlerDeps): (message: Inco
             carrierId: item.carrierId ?? null,
           });
         }
+        deps.state.regions.clear();
+        for (const region of message.regions ?? []) deps.state.regions.set(region.id, region);
         deps.state.ambiances.clear();
         for (const ambiance of message.ambiances ?? []) {
           deps.state.ambiances.set(ambiance.id, ambiance);
