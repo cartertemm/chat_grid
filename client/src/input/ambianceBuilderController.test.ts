@@ -6,6 +6,11 @@ const types: AmbianceType[] = [
   { id: 'rain', title: 'Rain', url: '/sounds/rain.ogg' },
   { id: 'wind', title: 'Wind', url: '/sounds/wind.ogg' },
 ];
+const cyclingTypes: AmbianceType[] = [
+  ...types,
+  { id: 'water', title: 'Water', url: '/sounds/water.ogg' },
+  { id: 'fire', title: 'Fire', url: '/sounds/fire.ogg' },
+];
 
 function ambiance(overrides: Partial<AmbianceRegion> = {}): AmbianceRegion {
   return {
@@ -23,7 +28,7 @@ function ambiance(overrides: Partial<AmbianceRegion> = {}): AmbianceRegion {
   };
 }
 
-function setup(options: { permission?: boolean; regions?: AmbianceRegion[] } = {}) {
+function setup(options: { permission?: boolean; regions?: AmbianceRegion[]; types?: AmbianceType[] } = {}) {
   const state = createInitialState();
   state.player.x = 4;
   state.player.y = 4;
@@ -51,7 +56,7 @@ function setup(options: { permission?: boolean; regions?: AmbianceRegion[] } = {
     openOptionSelector,
     openConfirmation,
   });
-  controller.setAmbianceTypes(types);
+  controller.setAmbianceTypes(options.types ?? types);
   return {
     announceMenuEntry,
     blip,
@@ -122,6 +127,91 @@ describe('World Builder ambiance controls', () => {
     expect(cancel).not.toHaveBeenCalled();
   });
 
+  it('keeps volume adjustments cumulative across an interleaved upsert and result', () => {
+    const { controller, send, state } = setup();
+    openAmbianceActions(controller, state);
+    const initial = ambiance();
+
+    for (let step = 0; step < 8; step += 1) controller.handleAmbianceActions('ArrowDown', 'ArrowDown');
+    controller.handleAmbianceActions('ArrowRight', 'ArrowRight');
+    controller.handleAmbianceActions('ArrowRight', 'ArrowRight');
+    expect(send.mock.calls.map(([message]) => message)).toEqual([
+      { type: 'ambiance_update', ambianceId: 'ambiance-1', volume: 30 },
+      { type: 'ambiance_update', ambianceId: 'ambiance-1', volume: 35 },
+    ]);
+    expect(state.ambiances.get('ambiance-1')).toEqual(initial);
+
+    state.ambiances.set('ambiance-1', { ...initial, volume: 30 });
+    controller.handleAmbianceActionResult({ ok: true, action: 'update', message: '30 percent', ambianceId: 'ambiance-1' });
+    controller.handleAmbianceActions('ArrowRight', 'ArrowRight');
+
+    expect(send).toHaveBeenLastCalledWith({ type: 'ambiance_update', ambianceId: 'ambiance-1', volume: 40 });
+    expect(state.ambiances.get('ambiance-1')?.volume).toBe(30);
+  });
+
+  it('preserves a pending fade adjustment while acknowledging a volume update', () => {
+    const { controller, send, state } = setup();
+    openAmbianceActions(controller, state);
+    for (let step = 0; step < 8; step += 1) controller.handleAmbianceActions('ArrowDown', 'ArrowDown');
+    controller.handleAmbianceActions('ArrowRight', 'ArrowRight');
+    controller.handleAmbianceActions('ArrowDown', 'ArrowDown');
+    controller.handleAmbianceActions('ArrowRight', 'ArrowRight');
+
+    state.ambiances.set('ambiance-1', { ...state.ambiances.get('ambiance-1')!, volume: 30 });
+    controller.handleAmbianceActionResult({ ok: true, action: 'update', message: '30 percent', ambianceId: 'ambiance-1' });
+    controller.handleAmbianceActions('ArrowRight', 'ArrowRight');
+
+    expect(send.mock.calls.map(([message]) => message)).toEqual([
+      { type: 'ambiance_update', ambianceId: 'ambiance-1', volume: 30 },
+      { type: 'ambiance_update', ambianceId: 'ambiance-1', fadeDistance: 4 },
+      { type: 'ambiance_update', ambianceId: 'ambiance-1', fadeDistance: 5 },
+    ]);
+    expect(state.ambiances.get('ambiance-1')).toMatchObject({ volume: 30, fadeDistance: 3 });
+  });
+
+  it('keeps type cycling cumulative across an interleaved upsert and result', () => {
+    const { controller, send, state } = setup({ types: cyclingTypes });
+    openAmbianceActions(controller, state);
+    const initial = ambiance();
+
+    controller.handleAmbianceActions('ArrowRight', 'ArrowRight');
+    controller.handleAmbianceActions('ArrowRight', 'ArrowRight');
+    expect(state.ambiances.get('ambiance-1')).toEqual(initial);
+
+    state.ambiances.set('ambiance-1', { ...initial, soundId: 'wind' });
+    controller.handleAmbianceActionResult({ ok: true, action: 'update', message: 'Wind', ambianceId: 'ambiance-1' });
+    controller.handleAmbianceActions('ArrowRight', 'ArrowRight');
+
+    expect(send.mock.calls.map(([message]) => message)).toEqual([
+      { type: 'ambiance_update', ambianceId: 'ambiance-1', soundId: 'wind' },
+      { type: 'ambiance_update', ambianceId: 'ambiance-1', soundId: 'water' },
+      { type: 'ambiance_update', ambianceId: 'ambiance-1', soundId: 'fire' },
+    ]);
+    expect(state.ambiances.get('ambiance-1')?.soundId).toBe('wind');
+  });
+
+  it('clears a pending adjustment when an update is rejected without an ambiance id', () => {
+    const { controller, send, state } = setup();
+    openAmbianceActions(controller, state);
+    for (let step = 0; step < 8; step += 1) controller.handleAmbianceActions('ArrowDown', 'ArrowDown');
+    controller.handleAmbianceActions('ArrowRight', 'ArrowRight');
+    controller.handleAmbianceActionResult({ ok: false, action: 'update', message: 'Rejected.' });
+    controller.handleAmbianceActions('ArrowRight', 'ArrowRight');
+
+    expect(send).toHaveBeenLastCalledWith({ type: 'ambiance_update', ambianceId: 'ambiance-1', volume: 30 });
+  });
+
+  it('clears pending adjustments when ambiance types are hydrated again', () => {
+    const { controller, send, state } = setup();
+    openAmbianceActions(controller, state);
+    for (let step = 0; step < 8; step += 1) controller.handleAmbianceActions('ArrowDown', 'ArrowDown');
+    controller.handleAmbianceActions('ArrowRight', 'ArrowRight');
+    controller.setAmbianceTypes(types);
+    controller.handleAmbianceActions('ArrowRight', 'ArrowRight');
+
+    expect(send).toHaveBeenLastCalledWith({ type: 'ambiance_update', ambianceId: 'ambiance-1', volume: 30 });
+  });
+
   it('adds directly from the root menu without type or direction menus', () => {
     const { controller, send, state } = setup();
 
@@ -167,7 +257,7 @@ describe('World Builder ambiance controls', () => {
     for (let step = 0; step < 6; step += 1) controller.handleAmbianceActions('ArrowDown', 'ArrowDown');
     controller.handleAmbianceActions('ArrowRight', 'ArrowRight');
     expect(send).toHaveBeenLastCalledWith({ type: 'ambiance_update', ambianceId: 'ambiance-1', volume: 30 });
-    expect(state.ambiances.get('ambiance-1')?.volume).toBe(30);
+    expect(state.ambiances.get('ambiance-1')?.volume).toBe(25);
 
     controller.handleAmbianceActions('ArrowUp', 'ArrowUp');
     controller.handleAmbianceActions('Enter', 'Enter');

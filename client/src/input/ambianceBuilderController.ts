@@ -13,6 +13,7 @@ import type { WorldBuilderDeps } from './worldBuilderController';
 
 type MenuEntry<T extends string = string> = { id: T; label: string; tooltip?: string };
 type AmbianceProperty = 'name' | 'volume' | 'fadeDistance';
+type AmbianceUpdateProperty = AmbianceProperty | 'soundId';
 type AmbianceEdgeAction = 'startX' | 'startY' | 'endX' | 'endY';
 type AmbianceSlideAction = 'slideX' | 'slideY';
 type AmbianceAction =
@@ -113,9 +114,17 @@ export function createAmbianceBuilderController(deps: WorldBuilderDeps & { onBac
   let selectedAmbianceId: string | null = null;
   let index = 0;
   let editingProperty: AmbianceProperty | null = null;
+  const pendingUpdates: { ambianceId: string; property: AmbianceUpdateProperty; value: string | number }[] = [];
 
   function selectedAmbiance(): AmbianceRegion | null {
-    return selectedAmbianceId ? deps.state.ambiances.get(selectedAmbianceId) ?? null : null;
+    const canonical = selectedAmbianceId ? deps.state.ambiances.get(selectedAmbianceId) : undefined;
+    if (!canonical) return null;
+    // Pending input belongs to the editor, never the server-owned world snapshot.
+    const preview = { ...canonical };
+    for (const update of pendingUpdates) {
+      if (update.ambianceId === canonical.id) Object.assign(preview, { [update.property]: update.value });
+    }
+    return preview;
   }
 
   function ambianceTypeTitle(soundId: string): string {
@@ -241,7 +250,7 @@ export function createAmbianceBuilderController(deps: WorldBuilderDeps & { onBac
 
   function sendUpdate(
     ambianceId: string,
-    property: 'name' | 'soundId' | 'volume' | 'fadeDistance',
+    property: AmbianceUpdateProperty,
     value: string | number,
   ): boolean {
     const latest = deps.state.ambiances.get(ambianceId);
@@ -249,6 +258,7 @@ export function createAmbianceBuilderController(deps: WorldBuilderDeps & { onBac
       handleStaleSelection();
       return false;
     }
+    pendingUpdates.push({ ambianceId, property, value });
     if (property === 'name') {
       deps.send({ type: 'ambiance_update', ambianceId, name: String(value) });
     } else if (property === 'soundId') {
@@ -259,16 +269,6 @@ export function createAmbianceBuilderController(deps: WorldBuilderDeps & { onBac
       deps.send({ type: 'ambiance_update', ambianceId, fadeDistance: Number(value) });
     }
     return true;
-  }
-
-  function previewNumericValue(ambianceId: string, property: 'volume' | 'fadeDistance', value: number): boolean {
-    const latest = deps.state.ambiances.get(ambianceId);
-    if (!latest) {
-      handleStaleSelection();
-      return false;
-    }
-    deps.state.ambiances.set(ambianceId, { ...latest, [property]: value });
-    return sendUpdate(ambianceId, property, value);
   }
 
   function handleListInput(code: string, key: string): void {
@@ -333,12 +333,6 @@ export function createAmbianceBuilderController(deps: WorldBuilderDeps & { onBac
       if (adjustment) {
         if (!hasPermission()) return;
         const nextSoundId = String(adjustment.value);
-        const latest = deps.state.ambiances.get(ambiance.id);
-        if (!latest) {
-          handleStaleSelection();
-          return;
-        }
-        deps.state.ambiances.set(ambiance.id, { ...latest, soundId: nextSoundId });
         if (!sendUpdate(ambiance.id, 'soundId', nextSoundId)) return;
         return;
       }
@@ -365,7 +359,7 @@ export function createAmbianceBuilderController(deps: WorldBuilderDeps & { onBac
           deps.cancel();
           return;
         }
-        if (!previewNumericValue(ambiance.id, currentAction, value)) return;
+        if (!sendUpdate(ambiance.id, currentAction, value)) return;
         return;
       }
     }
@@ -549,6 +543,9 @@ export function createAmbianceBuilderController(deps: WorldBuilderDeps & { onBac
     message: string;
     ambianceId?: string | null;
   }): void {
+    // The server processes this client's requests in order and sends each result
+    // after its canonical upsert. Failures also consume a request, without an upsert.
+    if (message.action === 'update') pendingUpdates.shift();
     deps.updateStatus(message.message);
     if (!message.ok) {
       deps.cancel();
@@ -569,6 +566,7 @@ export function createAmbianceBuilderController(deps: WorldBuilderDeps & { onBac
   return {
     setTypes(next: AmbianceType[]) {
       types = [...next];
+      pendingUpdates.length = 0;
     },
     requestAdd,
     openList,
