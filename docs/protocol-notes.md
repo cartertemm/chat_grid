@@ -1,5 +1,7 @@
 # Protocol Notes
 
+Named regions use `region_add`, `region_update` (name), `region_resize` (one edge, delta -1/+1), `region_slide` (axis, delta -1/+1) and `region_delete`. The server gates mutations with `world.structure.edit`, publishes `region_upsert`/`region_remove`, then sends `region_action_result`. Each region contains `id`, `name`, `floorZ`, `startX`, `startY`, `endX` and `endY`. Bounds are inclusive, and overlapping rectangles are valid. Welcome includes the complete `regions` collection.
+
 This is a behavior guide for packet semantics beyond raw schemas.
 
 ## Direction

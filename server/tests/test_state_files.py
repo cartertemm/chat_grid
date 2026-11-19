@@ -12,7 +12,13 @@ import pytest
 
 from .conftest import World
 
-STATE_FILES = ["items.json", "structures.json", "ambiances.json", "piano_songs.json"]
+STATE_FILES = [
+    "items.json",
+    "structures.json",
+    "ambiances.json",
+    "regions.json",
+    "piano_songs.json",
+]
 # A save cut off partway through, well-formed JSON of the wrong shape, and the
 # right shape holding an invalid entry.
 UNREADABLE_CONTENTS = {
