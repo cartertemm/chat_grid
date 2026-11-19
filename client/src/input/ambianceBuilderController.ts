@@ -3,6 +3,7 @@ import { getEditSessionAction } from './editSession';
 import { formatSteppedNumber } from './numeric';
 import {
   adjustPropertyValue,
+  announcePropertyValue,
   describePropertyHelp,
   getPropertyOptions,
   validateNumericPropertyInput,
@@ -355,7 +356,7 @@ export function createAmbianceBuilderController(deps: WorldBuilderDeps & { onBac
         if (!hasPermission()) return;
         const value = Number(adjustment.value);
         if (value === ambiance[currentAction]) {
-          deps.updateStatus(adjustment.displayValue);
+          announcePropertyValue(deps.updateStatus, adjustment.value, propertyMetadata(currentAction));
           deps.cancel();
           return;
         }
@@ -396,7 +397,6 @@ export function createAmbianceBuilderController(deps: WorldBuilderDeps & { onBac
             if (!hasPermission()) return;
             if (!sendUpdate(current.id, 'soundId', soundId)) return;
             deps.state.mode = 'worldBuilderAmbianceActions';
-            announceCurrentAction();
           },
           onCancel: () => {
             if (!selectedAmbiance()) {
@@ -472,7 +472,7 @@ export function createAmbianceBuilderController(deps: WorldBuilderDeps & { onBac
         deps.state.nicknameInput = adjustment.displayValue;
         deps.state.cursorPos = deps.state.nicknameInput.length;
         deps.setReplaceTextOnNextType(false);
-        deps.updateStatus(deps.state.nicknameInput);
+        announcePropertyValue(deps.updateStatus, adjustment.value, propertyMetadata(editingProperty));
         if (adjustment.hitBoundary) deps.cancel();
         else deps.blip();
         return;
@@ -525,7 +525,6 @@ export function createAmbianceBuilderController(deps: WorldBuilderDeps & { onBac
       editingProperty = null;
       deps.setReplaceTextOnNextType(false);
       deps.state.mode = 'worldBuilderAmbianceActions';
-      deps.updateStatus(`Updating ${label}.`);
       return;
     }
     deps.applyTextInputEdit(
@@ -546,11 +545,12 @@ export function createAmbianceBuilderController(deps: WorldBuilderDeps & { onBac
     // The server processes this client's requests in order and sends each result
     // after its canonical upsert. Failures also consume a request, without an upsert.
     if (message.action === 'update') pendingUpdates.shift();
-    deps.updateStatus(message.message);
     if (!message.ok) {
+      deps.updateStatus(message.message);
       deps.cancel();
       return;
     }
+    announcePropertyValue(deps.updateStatus, message.message);
     deps.confirm();
     if (message.action === 'add' && message.ambianceId) {
       const ambiance = deps.state.ambiances.get(message.ambianceId);

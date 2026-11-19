@@ -4,6 +4,7 @@ import { handleYesNoMenuInput, YES_NO_OPTIONS } from './yesNoMenu';
 import type { IncomingMessage, OutgoingMessage } from '../network/protocol';
 import type { GameMode } from '../state/gameState';
 import { formatLastSeen } from '../ui/lastSeen';
+import { announcePropertyValue } from './propertyControls';
 
 export type AdminMenuAction = {
   id: string;
@@ -167,7 +168,7 @@ export function createAdminController(deps: AdminControllerDeps): {
   }
 
   function handleAdminActionResult(message: Extract<IncomingMessage, { type: 'admin_action_result' }>): void {
-    if (message.action === 'role_update_permissions') {
+    if (message.ok && message.action === 'role_update_permissions') {
       return;
     }
     const suppressStatusMessage =
@@ -397,7 +398,7 @@ export function createAdminController(deps: AdminControllerDeps): {
       }
       role.permissions = [...nextPermissions].sort((a, b) => a.localeCompare(b));
       deps.signalingSend({ type: 'admin_role_update_permissions', role: role.name, permissions: role.permissions });
-      deps.updateStatus(`${value}: ${role.permissions.includes(value) ? 'on' : 'off'}`);
+      announcePropertyValue(deps.updateStatus, role.permissions.includes(value));
       deps.sfxUiBlip();
       return;
     }

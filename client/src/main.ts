@@ -51,6 +51,7 @@ import { getEditSessionAction } from './input/editSession';
 import { createOptionSelector } from './input/optionSelector';
 import { createConfirmationController } from './input/confirmationController';
 import { formatSteppedNumber, snapNumberToStep } from './input/numeric';
+import { announcePropertyValue } from './input/propertyControls';
 import { type IncomingMessage, type OutgoingMessage } from './network/protocol';
 import { createOnMessageHandler } from './network/messageHandlers';
 import { SignalingClient } from './network/signalingClient';
@@ -1918,7 +1919,6 @@ const onAppMessage = createOnMessageHandler({
   audioUiConfirm: () => audio.sfxUiConfirm(),
   audioUiCancel: () => audio.sfxUiCancel(),
   recomputeActiveItemPropertyKeys,
-  itemPropertyLabel,
   getItemPropertyValue,
   getItemById: (itemId) => state.items.get(itemId),
   shouldAnnounceItemPropertyEcho: () => Date.now() >= suppressItemPropertyEchoUntilMs,
@@ -2758,7 +2758,7 @@ function handleListModeInput(code: string, key: string): void {
     const next = clampMicInputGain(attempted);
     setPeerListenGainForNickname(entry.nickname, next);
     peerManager.setPeerListenGain(peerId, next);
-    updateStatus(`${entry.nickname} volume ${formatSteppedNumber(next, MIC_INPUT_GAIN_STEP)}.`);
+    announcePropertyValue(updateStatus, formatSteppedNumber(next, MIC_INPUT_GAIN_STEP));
     if (Math.abs(next - current) < 1e-9 || Math.abs(next - attempted) > 1e-9) {
       audio.sfxUiCancel();
     } else {

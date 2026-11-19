@@ -17,6 +17,21 @@ function setup() {
 }
 
 describe('named region builder', () => {
+  it('announces only the canonical name once after saving a rename', () => {
+    const { controller, state, updateStatus } = setup();
+    const region: NamedRegion = { id: 'new', name: 'Studio', floorZ: 0, startX: 1, startY: 1, endX: 2, endY: 2 };
+    state.regions.set(region.id, region);
+    controller.handleRegionActionResult({ ok: true, action: 'add', regionId: region.id, message: 'Added Studio.' });
+    controller.handleRegionActions('Enter', '');
+    state.nicknameInput = 'Closet';
+    updateStatus.mockClear();
+    controller.handleRegionEdit('Enter', '');
+    expect(updateStatus).not.toHaveBeenCalled();
+    state.regions.set(region.id, { ...region, name: 'Closet' });
+    controller.handleRegionActionResult({ ok: true, action: 'update', regionId: region.id, message: 'Closet' });
+    expect(updateStatus.mock.calls).toEqual([['Closet']]);
+  });
+
   it('creates, renames and adjusts canonical geometry through the existing builder', () => {
     const { controller, state, send, updateStatus } = setup();
     controller.handleRoot('KeyA', 'a');

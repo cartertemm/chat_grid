@@ -96,6 +96,10 @@ describe('native door settings', () => {
     ]);
     request.onSelect('positive');
     expect(test.send).toHaveBeenLastCalledWith(expect.objectContaining({ keypadSides: 'positive' }));
+    test.door.keypadSides = 'positive';
+    test.status.mockClear();
+    test.reply();
+    expect(test.status.mock.calls).toEqual([['North']]);
   });
 
   it('announces just the confirmed property value when adjusting with arrows', () => {
@@ -107,7 +111,7 @@ describe('native door settings', () => {
     expect(test.status).not.toHaveBeenCalled();
     test.door.unlockTimeoutSeconds = 1;
     test.reply();
-    expect(test.status.mock.calls).toEqual([['Unlock timeout, 1 second']]);
+    expect(test.status.mock.calls).toEqual([['1 second']]);
     test.key('ArrowRight');
     test.reply(false);
     expect(test.status).toHaveBeenLastCalledWith('The door changed. Try again.');

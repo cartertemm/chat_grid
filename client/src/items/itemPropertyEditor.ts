@@ -2,7 +2,7 @@ import { handleListControlKey } from '../input/listController';
 import { getEditSessionAction } from '../input/editSession';
 import { type WorldItem } from '../state/gameState';
 import type { OptionSelectorRequest } from '../input/optionSelector';
-import { adjustPropertyValue, getPropertyOptions } from '../input/propertyControls';
+import { adjustPropertyValue, announcePropertyValue, getPropertyOptions } from '../input/propertyControls';
 
 /**
  * Dependencies required to drive item property inspect/edit flows.
@@ -107,7 +107,7 @@ export function createItemPropertyEditor(deps: EditorDeps): {
       deps.suppressItemPropertyEchoMs(600);
       deps.signalingSend({ type: 'item_update', itemId, params: { [selectedKey]: adjustment.value } });
       deps.onPreviewPropertyChange?.(item, selectedKey, adjustment.value);
-      deps.updateStatus(adjustment.displayValue);
+      announcePropertyValue(deps.updateStatus, adjustment.value, metadata);
       if (adjustment.hitBoundary) deps.sfxUiCancel();
       else deps.sfxUiBlip();
       return;
@@ -123,9 +123,10 @@ export function createItemPropertyEditor(deps: EditorDeps): {
       if (metadata?.valueType === 'boolean') {
         const current = deps.getItemPropertyValue(item, selectedKey).toLowerCase() === 'on';
         const nextValue = !current;
+        deps.suppressItemPropertyEchoMs(600);
         deps.signalingSend({ type: 'item_update', itemId, params: { [selectedKey]: nextValue } });
         deps.onPreviewPropertyChange?.(item, selectedKey, nextValue);
-        deps.updateStatus(`${deps.itemPropertyLabel(selectedKey)}: ${nextValue ? 'on' : 'off'}`);
+        announcePropertyValue(deps.updateStatus, nextValue, metadata);
         deps.sfxUiBlip();
         return;
       }

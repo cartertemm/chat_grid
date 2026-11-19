@@ -1,12 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import {
   adjustPropertyValue,
+  announcePropertyValue,
   describePropertyHelp,
   getPropertyOptions,
   validateNumericPropertyInput,
 } from './propertyControls';
 
 describe('shared property controls', () => {
+  it('announces the display value of a selected setting', () => {
+    const spoken: string[] = [];
+    const announce = (value: string) => spoken.push(value);
+    announcePropertyValue(announce, 'positive', { options: [{ id: 'positive', label: 'North' }] });
+    announcePropertyValue(announce, 0.1 + 0.2, { range: { min: 0, max: 1, step: 0.05 } });
+    announcePropertyValue(announce, false);
+    announcePropertyValue(announce, 'Studio, upstairs');
+    expect(spoken).toEqual(['North', '0.3', 'off', 'Studio, upstairs']);
+  });
+
   it('normalizes and cycles labeled options', () => {
     const metadata = {
       valueType: 'list',

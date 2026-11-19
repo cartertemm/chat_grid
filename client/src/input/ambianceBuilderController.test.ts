@@ -96,6 +96,7 @@ describe('World Builder ambiance controls', () => {
     expect(blip).not.toHaveBeenCalled();
     expect(confirm).not.toHaveBeenCalled();
     expect(cancel).not.toHaveBeenCalled();
+    state.ambiances.set('ambiance-1', { ...state.ambiances.get('ambiance-1')!, volume: 30 });
     controller.handleAmbianceActionResult({
       ok: true, action: 'update', ambianceId: 'ambiance-1', message: '30 percent',
     });

@@ -2,6 +2,8 @@
 
 This document is the authoritative keymap for the client.
 
+In property editors, moving to a setting reads its name and current value. Adjusting the selected setting reads only the new value. For example, stepping a door's unlock timeout from 10 to 11 seconds reads “11 seconds.” Validation errors still explain what needs to change.
+
 ## Touch Controls
 
 - Touch controls appear automatically on coarse-pointer devices and can be shown or hidden from Settings.

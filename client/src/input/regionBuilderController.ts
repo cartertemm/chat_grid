@@ -154,7 +154,7 @@ export function createRegionBuilderController(deps: WorldBuilderDeps, onBack: ()
       }
       deps.send({ type: 'region_update', regionId: region.id, name });
       deps.setReplaceTextOnNextType(false);
-      openActions(region);
+      deps.state.mode = 'worldBuilderRegionActions';
     } else deps.applyTextInputEdit(code, key, 100, ctrlKey, true);
   }
 

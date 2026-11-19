@@ -4,7 +4,7 @@ import type { OptionSelectorRequest } from './optionSelector';
 import type { MobileTextEntry } from './mobileController';
 import { handleListControlKey } from './listController';
 import { applyTextInput, mapTextInputKey } from './textInput';
-import { adjustPropertyValue } from './propertyControls';
+import { adjustPropertyValue, announcePropertyValue, formatPropertyValue } from './propertyControls';
 
 const TIMEOUT_METADATA = { valueType: 'number', range: { min: 0, max: 300, step: 1 } };
 
@@ -73,26 +73,22 @@ export function createDoorSettingsController(deps: Deps) {
   function entries() {
     const current = door();
     if (!current) return [];
-    const result: { id: Property; label: string }[] = [
-      { id: 'title', label: `Name, ${current.title}` },
-      { id: 'unlockMode', label: `Unlock mode, ${current.unlockMode === 'keypad' ? 'Keypad' : 'None'}` },
-    ];
-    if (current.unlockMode === 'keypad')
+    function row(id: Property, name: string, value: string) {
+      return { id, name, value, label: `${name}, ${value}` };
+    }
+    const optionRow = (id: 'unlockMode' | 'keypadSides' | 'pinRequiredFor', name: string) =>
+      row(id, name, formatPropertyValue(current[id], { options: options(id) }));
+    const result = [row('title', 'Name', current.title), optionRow('unlockMode', 'Unlock mode')];
+    if (current.unlockMode === 'keypad') {
+      const pinLabel = current.hasPin ? 'Change PIN' : 'Set PIN';
+      const seconds = current.unlockTimeoutSeconds;
       result.push(
-        { id: 'pin', label: current.hasPin ? 'Change PIN' : 'Set PIN' },
-        {
-          id: 'keypadSides',
-          label: `Keypad sides, ${options('keypadSides').find((entry) => entry.id === current.keypadSides)?.label}`,
-        },
-        {
-          id: 'pinRequiredFor',
-          label: `Require PIN for, ${options('pinRequiredFor').find((entry) => entry.id === current.pinRequiredFor)?.label}`,
-        },
-        {
-          id: 'unlockTimeoutSeconds',
-          label: `Unlock timeout, ${current.unlockTimeoutSeconds === 0 ? 'Stays unlocked' : current.unlockTimeoutSeconds === 1 ? '1 second' : current.unlockTimeoutSeconds + ' seconds'}`,
-        },
+        { id: 'pin', name: pinLabel, label: pinLabel, value: 'PIN set.' },
+        optionRow('keypadSides', 'Keypad sides'),
+        optionRow('pinRequiredFor', 'Require PIN for'),
+        row('unlockTimeoutSeconds', 'Unlock timeout', seconds === 0 ? 'Stays unlocked' : `${seconds} ${seconds === 1 ? 'second' : 'seconds'}`),
       );
+    }
     return result;
   }
 
@@ -195,6 +191,7 @@ export function createDoorSettingsController(deps: Deps) {
         if (adjustment.hitBoundary) deps.cue(false);
         if (Number(adjustment.value) !== current.unlockTimeoutSeconds)
           send({ unlockTimeoutSeconds: Number(adjustment.value) });
+        else announcePropertyValue(deps.status, rows[index].value);
         return;
       }
     }
@@ -227,7 +224,7 @@ export function createDoorSettingsController(deps: Deps) {
       return;
     }
     deps.choose({
-      title: rows[index].label.split(',')[0],
+      title: rows[index].name,
       options: options(property),
       selectedId: String(current[property]),
       onSelect: (id) => chooseValue(property, id),
@@ -329,7 +326,8 @@ export function createDoorSettingsController(deps: Deps) {
       if (!rows.length) menu();
       else {
         index = Math.min(index, rows.length - 1);
-        deps.status(reply.ok ? rows[index].label : reply.message);
+        if (reply.ok) announcePropertyValue(deps.status, rows[index].value);
+        else deps.status(reply.message);
       }
       return true;
     },

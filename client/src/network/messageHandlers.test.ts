@@ -1,6 +1,6 @@
 import { incomingMessageSchema } from './protocol';
 import { describe, expect, it, vi } from 'vitest';
-import { createInitialState } from '../state/gameState';
+import { createInitialState, type WorldItem } from '../state/gameState';
 import { createOnMessageHandler } from './messageHandlers';
 
 function setupRemoteMovement() {
@@ -21,6 +21,7 @@ function setupRemoteMovement() {
   const pushChatMessage = vi.fn();
   const audioUiConfirm = vi.fn();
   const audioUiCancel = vi.fn();
+  const shouldAnnounceItemPropertyEcho = vi.fn(() => true);
   const peerManager = {
     ensurePeer: vi.fn(),
     setPeerPosition: vi.fn(),
@@ -35,6 +36,8 @@ function setupRemoteMovement() {
     pushChatMessage,
     audioUiConfirm,
     audioUiCancel,
+    getItemPropertyValue: (item: WorldItem, key: string) => key === 'title' ? item.title : String(item.params[key]),
+    shouldAnnounceItemPropertyEcho,
   };
   const deps = new Proxy(provided, {
     get(target, property, receiver) {
@@ -49,9 +52,52 @@ function setupRemoteMovement() {
     pushChatMessage,
     audioUiConfirm,
     audioUiCancel,
+    shouldAnnounceItemPropertyEcho,
     state,
   };
 }
+
+describe('item property update announcements', () => {
+  function selectedItem(): WorldItem {
+    return {
+      id: 'radio', type: 'radio_station', title: 'Studio radio',
+      x: 0, y: 0, z: 0, createdBy: 'self', updatedBy: 'self',
+      createdAt: 1, updatedAt: 1, version: 1,
+      capabilities: [], carrierId: null, occupiedOffsets: [{ x: 0, y: 0 }],
+      params: { volume: 50 },
+    };
+  }
+
+  it('announces only the changed selected value and ignores unrelated property updates', async () => {
+    const { handler, updateStatus, state } = setupRemoteMovement();
+    const item = selectedItem();
+    state.items.set(item.id, item);
+    state.selectedItemId = item.id;
+    state.mode = 'itemProperties';
+    state.itemPropertyKeys = ['volume'];
+    state.itemPropertyIndex = 0;
+
+    await handler({ type: 'item_upsert', item: { ...item, title: 'Renamed radio', version: 2 } });
+    expect(updateStatus).not.toHaveBeenCalled();
+    await handler({ type: 'item_upsert', item: { ...item, version: 3, params: { volume: 55 } } });
+    expect(updateStatus.mock.calls).toEqual([['55']]);
+  });
+
+  it('honors local arrow feedback suppression when the server confirms a changed value', async () => {
+    const { handler, updateStatus, state, shouldAnnounceItemPropertyEcho } = setupRemoteMovement();
+    const item = selectedItem();
+    state.items.set(item.id, item);
+    state.selectedItemId = item.id;
+    state.mode = 'itemProperties';
+    state.itemPropertyKeys = ['volume'];
+    state.itemPropertyIndex = 0;
+    shouldAnnounceItemPropertyEcho.mockReturnValue(false);
+
+    await handler({ type: 'item_upsert', item: { ...item, version: 2, params: { volume: 55 } } });
+    expect(updateStatus).not.toHaveBeenCalled();
+    expect(state.items.get(item.id)?.params.volume).toBe(55);
+  });
+});
 
 describe('item duplication results', () => {
   it('announces success once through the usual message flow and stays in normal mode', async () => {

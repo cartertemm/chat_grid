@@ -8,6 +8,7 @@ import type { OptionSelectorRequest } from './optionSelector';
 import type { ConfirmationRequest } from './confirmationController';
 import {
   adjustPropertyValue,
+  announcePropertyValue,
   describePropertyHelp,
   getPropertyOptions,
   validateNumericPropertyInput,
@@ -117,6 +118,26 @@ export function createWorldBuilderController(deps: WorldBuilderDeps) {
   let walls: WallStructure[] = [];
   let selectedWallId: string | null = null;
   let editingProperty: PropertyId | null = null;
+  const pendingSettings: {
+    action: 'update' | 'rotate';
+    structureId: string;
+    property: PropertyId | 'preset' | 'orientation';
+    value: string | number;
+  }[] = [];
+
+  function sendSetting(
+    wall: WallStructure,
+    property: PropertyId | 'preset' | 'orientation',
+    value: string | number,
+  ): void {
+    const action = property === 'orientation' ? 'rotate' : 'update';
+    pendingSettings.push({ action, structureId: wall.id, property, value });
+    if (property === 'orientation') {
+      deps.send({ type: 'structure_rotate_wall', structureId: wall.id, orientation: value as WallStructure['orientation'] });
+    } else {
+      deps.send({ type: 'structure_update_wall', structureId: wall.id, [property]: value });
+    }
+  }
   const regionBuilderController = createRegionBuilderController(deps, open);
   const ambianceBuilderController = createAmbianceBuilderController({
     ...deps,
@@ -124,7 +145,17 @@ export function createWorldBuilderController(deps: WorldBuilderDeps) {
   });
 
   function selectedWall(): WallStructure | null {
-    return selectedWallId ? deps.state.structures.get(selectedWallId) ?? null : null;
+    const canonical = selectedWallId ? deps.state.structures.get(selectedWallId) : undefined;
+    if (!canonical) return null;
+    const preview = { ...canonical };
+    for (const setting of pendingSettings) {
+      if (setting.structureId !== canonical.id) continue;
+      if (setting.property === 'preset') {
+        const preset = presets.find((entry) => entry.id === setting.value);
+        if (preset) Object.assign(preview, preset, { id: canonical.id, preset: preset.id });
+      } else Object.assign(preview, { [setting.property]: setting.value });
+    }
+    return preview;
   }
 
   function wallLabel(wall: WallStructure): string {
@@ -335,11 +366,7 @@ export function createWorldBuilderController(deps: WorldBuilderDeps) {
       if (adjustment) {
         const nextPreset = presets.find((preset) => preset.id === adjustment.value);
         if (!nextPreset) return;
-        deps.state.structures.set(wall.id, { ...wall, ...nextPreset, id: wall.id, preset: nextPreset.id });
-        deps.send({ type: 'structure_update_wall', structureId: wall.id, preset: nextPreset.id });
-        deps.updateStatus(adjustment.displayValue);
-        if (adjustment.hitBoundary) deps.cancel();
-        else deps.blip();
+        sendSetting(wall, 'preset', nextPreset.id);
         return;
       }
     }
@@ -350,13 +377,7 @@ export function createWorldBuilderController(deps: WorldBuilderDeps) {
       }
       const adjustment = adjustPropertyValue(code, wall.orientation, ORIENTATION_METADATA);
       if (adjustment) {
-        deps.send({
-          type: 'structure_rotate_wall',
-          structureId: wall.id,
-          orientation: adjustment.value as WallStructure['orientation'],
-        });
-        deps.updateStatus(adjustment.displayValue);
-        deps.blip();
+        sendSetting(wall, 'orientation', String(adjustment.value));
         return;
       }
     }
@@ -393,7 +414,7 @@ export function createWorldBuilderController(deps: WorldBuilderDeps) {
           options: getPropertyOptions(typeMetadata(presets)),
           selectedId: wall.preset,
           onSelect: (preset) => {
-            deps.send({ type: 'structure_update_wall', structureId: wall.id, preset });
+            sendSetting(wall, 'preset', preset);
             deps.state.mode = 'worldBuilderWallActions';
           },
           onCancel: () => {
@@ -424,11 +445,7 @@ export function createWorldBuilderController(deps: WorldBuilderDeps) {
           options: getPropertyOptions(ORIENTATION_METADATA),
           selectedId: wall.orientation,
           onSelect: (orientation) => {
-            deps.send({
-              type: 'structure_rotate_wall',
-              structureId: wall.id,
-              orientation: orientation as WallStructure['orientation'],
-            });
+            sendSetting(wall, 'orientation', orientation);
             deps.state.mode = 'worldBuilderWallActions';
           },
           onCancel: () => {
@@ -453,12 +470,13 @@ export function createWorldBuilderController(deps: WorldBuilderDeps) {
       if (adjustment) {
         if (property === 'soundTransmission' || property === 'occlusionLowpassHz') {
           const nextValue = Number(adjustment.value);
-          deps.state.structures.set(wall.id, { ...wall, [property]: nextValue });
-          deps.send({ type: 'structure_update_wall', structureId: wall.id, [property]: nextValue });
+          if (nextValue !== wall[property]) {
+            sendSetting(wall, property, nextValue);
+            return;
+          }
         }
-        deps.updateStatus(adjustment.displayValue);
-        if (adjustment.hitBoundary) deps.cancel();
-        else deps.blip();
+        announcePropertyValue(deps.updateStatus, adjustment.value, propertyMetadata(property));
+        deps.cancel();
         return;
       }
     }
@@ -499,7 +517,7 @@ export function createWorldBuilderController(deps: WorldBuilderDeps) {
         deps.state.nicknameInput = adjustment.displayValue;
         deps.state.cursorPos = deps.state.nicknameInput.length;
         deps.setReplaceTextOnNextType(false);
-        deps.updateStatus(deps.state.nicknameInput);
+        announcePropertyValue(deps.updateStatus, adjustment.value, propertyMetadata(editingProperty));
         if (adjustment.hitBoundary) deps.cancel();
         else deps.blip();
         return;
@@ -533,9 +551,8 @@ export function createWorldBuilderController(deps: WorldBuilderDeps) {
         }
         value = parsed.value;
       }
-      deps.send({ type: 'structure_update_wall', structureId: wall.id, [editingProperty]: value });
+      sendSetting(wall, editingProperty, value);
       deps.state.mode = 'worldBuilderPropertyList';
-      deps.updateStatus(`Updating ${PROPERTY_ACTIONS.find((entry) => entry.id === editingProperty)?.label ?? 'property'}.`);
       return;
     }
     deps.applyTextInputEdit(code, key, editingProperty === 'contactSound' ? 200 : 10, ctrlKey, true);
@@ -544,6 +561,7 @@ export function createWorldBuilderController(deps: WorldBuilderDeps) {
   return {
     setPresets(next: StructurePreset[]) {
       presets = [...next];
+      pendingSettings.length = 0;
     },
     getEditingPropertyLabel() {
       return PROPERTY_ACTIONS.find((entry) => entry.id === editingProperty)?.label ?? 'Wall property';
@@ -573,11 +591,15 @@ export function createWorldBuilderController(deps: WorldBuilderDeps) {
       message: string;
       structureId?: string | null;
     }) {
-      deps.updateStatus(message.message);
+      const pendingIndex = pendingSettings.findIndex((setting) => setting.action === message.action
+        && (!message.structureId || setting.structureId === message.structureId));
+      if (pendingIndex >= 0) pendingSettings.splice(pendingIndex, 1);
       if (!message.ok) {
+        deps.updateStatus(message.message);
         deps.cancel();
         return;
       }
+      announcePropertyValue(deps.updateStatus, message.message);
       deps.confirm();
       if (message.action === 'add' && message.structureId) {
         const wall = deps.state.structures.get(message.structureId);

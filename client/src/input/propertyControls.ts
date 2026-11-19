@@ -23,6 +23,24 @@ export function getPropertyOptions(metadata: PropertyControlMetadata | undefined
   ));
 }
 
+export function formatPropertyValue(value: string | number | boolean, metadata?: PropertyControlMetadata): string {
+  const option = getPropertyOptions(metadata).find((entry) => entry.id === String(value));
+  if (option) return option.label;
+  if (typeof value === 'boolean') return value ? 'on' : 'off';
+  const step = metadata?.range?.step;
+  if (typeof value === 'number' && step && step > 0) return formatSteppedNumber(value, step);
+  return String(value);
+}
+
+/** While a setting is selected, speak only its new value. Navigation supplies the property name. */
+export function announcePropertyValue(
+  updateStatus: (message: string) => void,
+  value: string | number | boolean,
+  metadata?: PropertyControlMetadata,
+): void {
+  updateStatus(formatPropertyValue(value, metadata));
+}
+
 /** Describe a property using shared type, range, option, and editability metadata. */
 export function describePropertyHelp(
   label: string,
@@ -69,7 +87,7 @@ export function adjustPropertyValue(
       ? currentValue
       : ['on', 'true', '1', 'yes'].includes(String(currentValue).trim().toLowerCase());
     const value = !current;
-    return { value, displayValue: value ? 'on' : 'off', hitBoundary: false };
+    return { value, displayValue: formatPropertyValue(value), hitBoundary: false };
   }
 
   if (metadata?.valueType !== 'number') return null;
