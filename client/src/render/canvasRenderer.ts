@@ -75,7 +75,7 @@ export class CanvasRenderer {
     }
     this.drawObject(state.player, '#34d399', state.player.nickname);
 
-    if (state.mode === 'nickname' || state.mode === 'chat' || state.mode === 'itemPropertyEdit' || state.mode === 'worldBuilderAmbianceEdit') {
+    if (state.mode === 'nickname' || state.mode === 'chat' || state.mode === 'itemPropertyEdit' || state.mode === 'worldBuilderAmbianceEdit' || state.mode === 'worldBuilderRegionEdit') {
       const label =
         state.mode === 'nickname' ? 'New Nickname' : state.mode === 'chat' ? 'Message' : 'Property Value';
       this.drawTextOverlay(state, label);
