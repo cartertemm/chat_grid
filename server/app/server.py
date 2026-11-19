@@ -33,6 +33,7 @@ from .acoustic_zones import (
     client_position_packet,
     floor_acoustic_zone_id,
 )
+from .region_service import RegionError, RegionService
 from .ambiance_service import AmbianceError, AmbianceService
 from .client import ClientConnection, RateLimitName
 from .config import RateLimitsConfigSection, load_config
@@ -70,6 +71,14 @@ from .models import (
     AdminUserSummary,
     AdminUsersListPacket,
     AdminUsersListResultPacket,
+    RegionActionResultPacket,
+    RegionAddPacket,
+    RegionUpdatePacket,
+    RegionResizePacket,
+    RegionSlidePacket,
+    RegionDeletePacket,
+    RegionUpsertPacket,
+    RegionRemovePacket,
     AmbianceActionResultPacket,
     AmbianceAddPacket,
     AmbianceDeletePacket,
@@ -176,6 +185,7 @@ AdminActionName: TypeAlias = Literal[
     "user_delete",
 ]
 
+RegionActionName: TypeAlias = Literal["add", "update", "resize", "slide", "delete"]
 AmbianceActionName: TypeAlias = Literal["add", "update", "resize", "slide", "delete"]
 
 
@@ -264,6 +274,11 @@ class SignalingServer:
             state_file=structure_state_file,
             grid_size=self.grid_size,
             presets=structure_presets or {},
+        )
+        self.region_service = RegionService(
+            state_file=state_file.with_name("regions.json") if state_file else None,
+            grid_size=grid_size,
+            floor_elevations=FLOOR_ELEVATIONS,
         )
         ambiance_state_file = (
             state_file.with_name("ambiances.json") if state_file else None
@@ -706,6 +721,7 @@ class SignalingServer:
         self.item_service.save_state()
         self.structure_service.save_state()
         self.ambiance_service.save_state()
+        self.region_service.save_state()
 
     def _request_state_save(self) -> None:
         """Debounce/coalesce world-state persistence to reduce write churn."""
@@ -1104,6 +1120,9 @@ class SignalingServer:
             structures=[
                 structure.model_dump()
                 for structure in self.structure_service.structures.values()
+            ],
+            regions=[
+                region.model_dump() for region in self.region_service.regions.values()
             ],
             ambiances=[
                 ambiance.model_dump()
@@ -1711,6 +1730,123 @@ class SignalingServer:
         )
         return True
 
+    async def _handle_region_packet(
+        self, client: ClientConnection, packet: ClientPacket
+    ) -> bool:
+        """Handle permission-gated live named region mutations."""
+
+        if not isinstance(
+            packet,
+            (
+                RegionAddPacket,
+                RegionUpdatePacket,
+                RegionResizePacket,
+                RegionSlidePacket,
+                RegionDeletePacket,
+            ),
+        ):
+            return False
+        action: RegionActionName = (
+            "add"
+            if isinstance(packet, RegionAddPacket)
+            else "update"
+            if isinstance(packet, RegionUpdatePacket)
+            else "resize"
+            if isinstance(packet, RegionResizePacket)
+            else "slide"
+            if isinstance(packet, RegionSlidePacket)
+            else "delete"
+        )
+        if not self._client_has_permission(client, "world.structure.edit"):
+            await self.delivery.send(
+                client,
+                RegionActionResultPacket(
+                    type="region_action_result",
+                    ok=False,
+                    action=action,
+                    message="Not authorized to edit world regions.",
+                ),
+            )
+            return True
+
+        try:
+            if isinstance(packet, RegionAddPacket):
+                region = self.region_service.add_region(client)
+                result_message = f"Added {region.name}."
+            elif isinstance(packet, RegionUpdatePacket):
+                region = self.region_service.update_region(
+                    packet.regionId,
+                    name=packet.name,
+                )
+                result_message = region.name
+            elif isinstance(packet, RegionResizePacket):
+                region = self.region_service.resize_region(
+                    packet.regionId,
+                    edge=packet.edge,
+                    delta=packet.delta,
+                )
+                result_message = {
+                    "west": str(region.startX),
+                    "east": str(region.endX),
+                    "south": str(region.startY),
+                    "north": str(region.endY),
+                }[packet.edge]
+            elif isinstance(packet, RegionSlidePacket):
+                region = self.region_service.slide_region(
+                    packet.regionId,
+                    axis=packet.axis,
+                    delta=packet.delta,
+                )
+                result_message = (
+                    f"{region.startX} to {region.endX}"
+                    if packet.axis == "x"
+                    else f"{region.startY} to {region.endY}"
+                )
+            else:
+                removed = self.region_service.remove(packet.regionId)
+                self._request_state_save()
+                await self.delivery.broadcast(
+                    RegionRemovePacket(type="region_remove", regionId=removed.id)
+                )
+                await self.delivery.send(
+                    client,
+                    RegionActionResultPacket(
+                        type="region_action_result",
+                        ok=True,
+                        action=action,
+                        message=f"Deleted {removed.name}.",
+                        regionId=removed.id,
+                    ),
+                )
+                return True
+        except RegionError as exc:
+            await self.delivery.send(
+                client,
+                RegionActionResultPacket(
+                    type="region_action_result",
+                    ok=False,
+                    action=action,
+                    message=str(exc),
+                ),
+            )
+            return True
+
+        self._request_state_save()
+        await self.delivery.broadcast(
+            RegionUpsertPacket(type="region_upsert", region=region)
+        )
+        await self.delivery.send(
+            client,
+            RegionActionResultPacket(
+                type="region_action_result",
+                ok=True,
+                action=action,
+                message=result_message,
+                regionId=region.id,
+            ),
+        )
+        return True
+
     @staticmethod
     def _format_duration(total_seconds: int) -> str:
         """Format a duration value as compact human-readable text."""
@@ -2218,6 +2354,9 @@ class SignalingServer:
             return
 
         if await self._handle_structure_packet(client, packet):
+            return
+
+        if await self._handle_region_packet(client, packet):
             return
 
         if await self._handle_ambiance_packet(client, packet):

@@ -13,6 +13,7 @@ import {
   validateNumericPropertyInput,
   type PropertyControlMetadata,
 } from './propertyControls';
+import { createRegionBuilderController } from './regionBuilderController';
 import { createAmbianceBuilderController } from './ambianceBuilderController';
 import type { AmbianceType } from '../state/gameState';
 
@@ -38,6 +39,7 @@ const ROOT_ACTIONS = [
   { id: 'edit', label: 'Edit walls', tooltip: 'Choose a wall on this floor to resize, edit, or delete.' },
   { id: 'addAmbiance', label: 'Add ambiance', tooltip: 'Create a one-square ambiance at your current position.' },
   { id: 'editAmbiances', label: 'Edit ambiances', tooltip: 'Choose an ambiance on this floor to resize, edit, or delete.' },
+  { id: 'regions', label: 'Regions', tooltip: 'Create or edit named areas on this floor.' },
 ] as const;
 const DIRECTIONS = [
   { id: 'north', label: 'North', tooltip: 'Place the wall along the north edge of your current square.' },
@@ -112,6 +114,7 @@ export function createWorldBuilderController(deps: WorldBuilderDeps) {
   let walls: WallStructure[] = [];
   let selectedWallId: string | null = null;
   let editingProperty: PropertyId | null = null;
+  const regionBuilderController = createRegionBuilderController(deps, open);
   const ambianceBuilderController = createAmbianceBuilderController({
     ...deps,
     onBackToRoot: () => open(),
@@ -223,6 +226,10 @@ export function createWorldBuilderController(deps: WorldBuilderDeps) {
 
   function handleRoot(code: string, key: string): void {
     handleList(code, key, ROOT_ACTIONS, (entry) => {
+      if (entry === 'regions') {
+        regionBuilderController.open();
+        return;
+      }
       if (entry === 'add') {
         if (presets.length === 0) {
           deps.updateStatus('No wall presets are configured.');
@@ -537,6 +544,11 @@ export function createWorldBuilderController(deps: WorldBuilderDeps) {
     handleWallActions,
     handlePropertyList,
     handlePropertyEdit,
+    handleRegionRoot: regionBuilderController.handleRoot,
+    handleRegionList: regionBuilderController.handleList,
+    handleRegionActions: regionBuilderController.handleActions,
+    handleRegionEdit: regionBuilderController.handleEdit,
+    handleRegionActionResult: regionBuilderController.handleActionResult,
     handleAmbianceList: ambianceBuilderController.handleList,
     handleAmbianceActions: ambianceBuilderController.handleActions,
     handleAmbianceEdit: ambianceBuilderController.handleEdit,

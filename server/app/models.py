@@ -316,6 +316,45 @@ class AmbianceDeletePacket(BasePacket):
     ambianceId: str
 
 
+class RegionAddPacket(BasePacket):
+    """Request one default one-cell region at the caller's position."""
+
+    type: Literal["region_add"]
+
+
+class RegionUpdatePacket(BasePacket):
+    """Update editable properties on one named region."""
+
+    type: Literal["region_update"]
+    regionId: str
+    name: str | None = Field(default=None, max_length=100)
+
+
+class RegionResizePacket(BasePacket):
+    """Move one edge of an region rectangle by one cell."""
+
+    type: Literal["region_resize"]
+    regionId: str
+    edge: Literal["west", "east", "south", "north"]
+    delta: Literal[-1, 1]
+
+
+class RegionSlidePacket(BasePacket):
+    """Translate an region rectangle by one cell along one axis."""
+
+    type: Literal["region_slide"]
+    regionId: str
+    axis: Literal["x", "y"]
+    delta: Literal[-1, 1]
+
+
+class RegionDeletePacket(BasePacket):
+    """Delete one complete named region."""
+
+    type: Literal["region_delete"]
+    regionId: str
+
+
 ClientPacket = (
     UpdatePositionPacket
     | UpdateFacingPacket
@@ -364,6 +403,11 @@ ClientPacket = (
     | AmbianceResizePacket
     | AmbianceSlidePacket
     | AmbianceDeletePacket
+    | RegionAddPacket
+    | RegionUpdatePacket
+    | RegionResizePacket
+    | RegionSlidePacket
+    | RegionDeletePacket
 )
 
 
@@ -386,6 +430,7 @@ class WelcomePacket(BasePacket):
     items: list[dict] | None = None
     structures: list[dict] | None = None
     ambiances: list[dict] | None = None
+    regions: list[dict] | None = None
     worldConfig: dict | None = None
     uiDefinitions: dict | None = None
     serverInfo: dict | None = None
@@ -580,6 +625,18 @@ class AmbianceRegion(BaseModel):
     endY: StrictInt = Field(ge=0)
     volume: StrictInt = Field(default=25, ge=0, le=100)
     fadeDistance: FiniteFloat = Field(default=5.0, ge=0.0, le=100.0)
+
+
+class NamedRegion(BaseModel):
+    """Server-owned inclusive rectangle describing a named place."""
+
+    id: str = Field(min_length=1, max_length=128)
+    name: str = Field(min_length=1, max_length=100)
+    floorZ: StrictInt
+    startX: StrictInt = Field(ge=0)
+    startY: StrictInt = Field(ge=0)
+    endX: StrictInt = Field(ge=0)
+    endY: StrictInt = Field(ge=0)
 
 
 class AmbianceType(BaseModel):
@@ -799,3 +856,27 @@ class AdminActionResultPacket(BasePacket):
         "user_delete",
     ]
     message: str
+
+
+class RegionUpsertPacket(BasePacket):
+    """Broadcast a complete canonical region after a live mutation."""
+
+    type: Literal["region_upsert"]
+    region: NamedRegion
+
+
+class RegionRemovePacket(BasePacket):
+    """Broadcast removal of one canonical named region."""
+
+    type: Literal["region_remove"]
+    regionId: str
+
+
+class RegionActionResultPacket(BasePacket):
+    """Report one permission-gated region mutation to its caller."""
+
+    type: Literal["region_action_result"]
+    ok: bool
+    action: Literal["add", "update", "resize", "slide", "delete"]
+    message: str
+    regionId: str | None = None

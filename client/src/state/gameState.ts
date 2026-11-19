@@ -39,6 +39,16 @@ export type AmbianceRegion = {
   fadeDistance: number;
 };
 
+export type NamedRegion = {
+  id: string;
+  name: string;
+  floorZ: number;
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
+};
+
 export type AmbianceType = { id: string; title: string; url: string };
 
 export type WallStructure = {
@@ -96,6 +106,10 @@ export type GameMode =
   | 'worldBuilderWallActions'
   | 'worldBuilderPropertyList'
   | 'worldBuilderPropertyEdit'
+  | 'worldBuilderRegionRoot'
+  | 'worldBuilderRegionList'
+  | 'worldBuilderRegionActions'
+  | 'worldBuilderRegionEdit'
   | 'worldBuilderAmbianceList'
   | 'worldBuilderAmbianceActions'
   | 'worldBuilderAmbianceEdit'
@@ -149,6 +163,7 @@ export type GameState = {
   items: Map<string, WorldItem>;
   structures: Map<string, WallStructure>;
   ambiances: Map<string, AmbianceRegion>;
+  regions: Map<string, NamedRegion>;
   elevatorItemId: string | null;
 };
 
@@ -188,6 +203,7 @@ export function createInitialState(): GameState {
     items: new Map(),
     structures: new Map(),
     ambiances: new Map(),
+    regions: new Map(),
     elevatorItemId: null,
   };
 }

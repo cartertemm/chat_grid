@@ -68,6 +68,8 @@ This document is the authoritative keymap for the client.
 - On transmission or low-pass, `ArrowLeft`/`ArrowRight` changes one numeric step and `PageDown`/`PageUp` changes ten steps. Inside the numeric editor, use `ArrowDown`/`ArrowUp` and the corresponding page keys.
 - `Space`: Read specific help for the selected World Builder action, preset, direction, or wall. Property help uses shared metadata to report its type, options or numeric range, and editability.
 - Walls are edited live. Other connected clients receive and render changes immediately.
+- `Regions` opens the named-place submenu. Add a one-square region at your current tile or choose an existing region on this floor. Edit its name with Enter, adjust Start X/Y and End X/Y with Left/Right, or slide its complete rectangle with Slide X/Y. Deletion uses the default-No confirmation. Regions may overlap and have no audio settings.
+- `C` includes every named region containing your tile, smallest inclusive area first. For example, inside a closet within a studio it reads `Closet, Studio`. Coordinates and adjacent wall information are retained.
 - Wall deletion uses the same default-No confirmation flow as item deletion; confirmation choices do not have tooltips.
 - Brick, glass, and fence walls block movement. Curtains may be crossed; wall impacts and curtain crossings play the structure's contact sound locally and spatially for nearby users.
 - New curtain, glass, and fence walls use their matching contact sounds; brick uses the standard wall sound. Builders may edit any wall's sound URL.
