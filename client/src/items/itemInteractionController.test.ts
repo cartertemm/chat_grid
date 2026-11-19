@@ -52,10 +52,10 @@ function createFixture() {
     updateStatus: vi.fn(),
     sfxUiBlip: vi.fn(),
     sfxUiCancel: vi.fn(),
-    hasPermission: vi.fn(() => true),
+    hasPermission: vi.fn((permission: string) => permission.length > 0),
     getAuthUserId: vi.fn(() => PLAYER_ID),
-    getItemManagementActionMetadata: vi.fn((action: 'delete' | 'transfer' | 'hand') => ({
-      label: action === 'delete' ? 'Delete item' : action === 'transfer' ? 'Transfer ownership' : 'Hand to user',
+    getItemManagementActionMetadata: vi.fn((action: 'delete' | 'transfer' | 'hand' | 'duplicate') => ({
+      label: action === 'duplicate' ? 'Duplicate here' : action === 'delete' ? 'Delete item' : action === 'transfer' ? 'Transfer ownership' : 'Hand to user',
       anyPermission: action === 'hand' ? 'item.pickup_drop.any' : undefined,
       ownPermission: action === 'hand' ? 'item.pickup_drop.own' : `item.${action}.own`,
     })),
@@ -73,6 +73,21 @@ function createFixture() {
 }
 
 describe('item interaction controller', () => {
+  it('duplicates another owner\'s item and selects the returned copy among stacked items', () => {
+    const { controller, deps, ground } = createFixture();
+    ground.createdBy = 'someone-else';
+    deps.hasPermission.mockImplementation((permission: string) => permission === 'item.create');
+    expect(controller.getManagementOptions(ground).map((option) => option.action)).toEqual(['duplicate']);
+    controller.beginItemManagement(ground);
+    controller.handleItemManageOptionsModeInput('Enter', 'Enter');
+    expect(deps.signalingSend).toHaveBeenCalledWith({ type: 'item_duplicate', itemId: ground.id });
+    const copy = { ...ground, id: 'new-copy', createdBy: PLAYER_ID };
+    deps.state.items.set(copy.id, copy);
+    expect(controller.handleDuplicateResult({ type: 'item_action_result', action: 'duplicate', ok: true, itemId: copy.id, message: 'Copy created.' })).toBe(true);
+    expect(deps.state.selectedItemId).toBe('new-copy');
+    expect(deps.state.mode).toBe('itemProperties');
+    expect(deps.updateStatus).toHaveBeenLastCalledWith(expect.stringContaining('New copy selected.'));
+  });
   it('keeps held items distinguishable while selecting use, secondary use, edit, inspect, and manage actions', () => {
     const contexts: Array<{
       context: Exclude<SelectionContext, null>;
@@ -144,12 +159,14 @@ describe('item interaction controller', () => {
       { action: 'transfer', label: 'Transfer ownership', tooltip: undefined },
       { action: 'hand', label: 'Hand to user', tooltip: undefined },
       { action: 'delete', label: 'Delete item', tooltip: undefined },
+      { action: 'duplicate', label: 'Duplicate here', tooltip: 'Create an independent copy on your square. You own the copy.' },
     ]);
     const otherHeld = item('other-held', 'other-player');
-    expect(fixture.controller.getManagementOptions(otherHeld).map((option) => option.action)).toEqual(['delete']);
+    expect(fixture.controller.getManagementOptions(otherHeld).map((option) => option.action)).toEqual(['delete', 'duplicate']);
     expect(fixture.controller.getManagementOptions(fixture.ground)).toEqual([
       { action: 'transfer', label: 'Transfer ownership', tooltip: undefined },
       { action: 'delete', label: 'Delete item', tooltip: undefined },
+      { action: 'duplicate', label: 'Duplicate here', tooltip: 'Create an independent copy on your square. You own the copy.' },
     ]);
   });
 

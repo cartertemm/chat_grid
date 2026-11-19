@@ -268,14 +268,16 @@ class ItemService:
                 "failed to persist item state to %s: %s", self.state_file, exc
             )
 
-    def save_piano_songs(self) -> None:
-        """Persist compact piano song registry payload to configured storage file."""
+    def save_piano_songs(self) -> bool:
+        """Persist songs, returning False on failure and True for memory-only worlds."""
 
         if not self.piano_songs_file:
-            return
+            return True
         try:
             write_json_atomic(self.piano_songs_file, self.piano_songs)
+            return True
         except Exception as exc:
             LOGGER.warning(
                 "failed to persist piano songs to %s: %s", self.piano_songs_file, exc
             )
+            return False

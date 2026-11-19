@@ -1,5 +1,9 @@
 # Protocol Notes
 
+## Item duplication
+
+Send item_duplicate with itemId to duplicate an item available on the caller's square or held by the caller. The server broadcasts item_upsert for the independent caller-owned copy and replies with item_action_result, action duplicate, and the new itemId on success. The client uses that ID to select the new copy even when it overlaps the original. Failures create neither an item nor a saved song. Duplication uses the same creation rate budget as item_add and the ordinary ownership quota.
+
 This is a behavior guide for packet semantics beyond raw schemas.
 
 ## Direction

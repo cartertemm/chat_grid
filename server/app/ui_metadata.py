@@ -73,6 +73,13 @@ ADMIN_MENU_ACTION_DEFINITIONS: tuple[AdminMenuActionDefinition, ...] = (
 
 ITEM_MANAGEMENT_ACTION_DEFINITIONS: tuple[ItemManagementActionDefinition, ...] = (
     {
+        "id": "duplicate",
+        "label": "Duplicate here",
+        "tooltip": "Create an independent copy on your square. You own the copy.",
+        "anyPermission": "item.create",
+        "ownPermission": "item.create",
+    },
+    {
         "id": "transfer",
         "label": "Transfer ownership",
         "tooltip": "Transfer ownership of this item to another user.",

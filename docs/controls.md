@@ -47,6 +47,7 @@ This document is the authoritative keymap for the client.
 - `Shift+O`: Inspect all item properties
 - `D`: Pick up or drop item
 - `Z`: Manage items
+- `Duplicate here` in item management creates a separate copy on your square, owned by you, and selects the new copy for editing. Anyone with item creation permission can duplicate another user's item. The usual creation quota and rate limit apply.
 - `Hand to user`: Select an eligible nearby user to receive a held item without changing ownership.
 - `Transfer ownership`: Change an item’s owner without moving it or changing who holds it.
 - `Space` in item management menu: Read tooltip/help for the selected action
