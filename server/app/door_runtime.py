@@ -135,7 +135,7 @@ class DoorRuntime:
                 )
             except StructureError:
                 active = False
-            if not active:
+            if not active and self.sessions.get(door_id) is session:
                 del self.sessions[door_id]
                 await self.notify(
                     session.client,
@@ -149,6 +149,8 @@ class DoorRuntime:
                     ),
                 )
         for wall in list(self.structures.structures.values()):
+            if self.structures.structures.get(wall.id) is not wall:
+                continue
             changed = False
             for door in wall.doors:
                 if door.unlockDeadlineMs is not None and now >= door.unlockDeadlineMs:
