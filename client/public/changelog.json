@@ -16,7 +16,7 @@
         "Add doors to walls in World Builder. A wall can have several doors, and a four-digit PIN can protect one or both sides. Unlocking a door leaves it closed until someone presses Enter to open it.",
         "Use Duplicate here in the Z item menu to make an independent copy of an item. You own the copy and can edit it separately.",
         "Give areas names with Regions in World Builder. Press C to hear your coordinates and any regions you’re in, smallest first. A closet inside a studio reads “Closet, Studio.”",
-        "Andrew Johnson (@akj) improved automatic reconnection after server restarts and made world saves more resilient to interruptions."
+        "@akj improved automatic reconnection after server restarts and made world saves more resilient to interruptions."
       ]
     },
     {
