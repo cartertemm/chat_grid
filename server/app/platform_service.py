@@ -89,6 +89,27 @@ class PlatformService:
                 return platform
         return None
 
+    def landing_position(self, x: int, y: int, z: int) -> tuple[int, int, int] | None:
+        """Land at this surface or the highest supporting platform below it."""
+        landings = [
+            platform.z
+            for platform in self.platforms.values()
+            if platform.z <= z and platform.contains(x, y, platform.z)
+        ]
+        return (x, y, max(landings)) if landings else None
+
+    def highest_platform_below(self, x: int, y: int, z: int) -> Platform | None:
+        """Find the highest surface strictly below one shaft position."""
+        return max(
+            (
+                platform
+                for platform in self.platforms.values()
+                if platform.z < z and platform.contains(x, y, platform.z)
+            ),
+            key=lambda platform: platform.z,
+            default=None,
+        )
+
     def valid_step(self, x: int, y: int, z: int, target_x: int, target_y: int) -> bool:
         """Require supported destinations and both cells around diagonal corners."""
         if max(abs(target_x - x), abs(target_y - y)) > 1 or not self.contains(

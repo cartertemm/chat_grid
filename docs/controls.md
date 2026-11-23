@@ -61,6 +61,8 @@ Press Space on a property row or in its option list to hear help for the current
 - `Enter`: Use item
 - `Shift+Enter`: Secondary item action
 - For an elevator, `Enter` calls or starts opening it, enters or exits only after the door is fully open, and has no boarding effect while the door is opening or closing.
+- A two-stop car selects the other stop when you board. With three or more stops, boarding opens the shared floor selector. `Up`/`Down` browse destinations and direction, `Enter` requests the selected stop, and `Escape` closes the selector while you remain aboard. **Choose floor** in Commands or touch controls reopens it. `Shift+Enter` reports the car's status.
+- Elevator **Stops** accepts a comma-delimited list such as `0,20,40`. **Speed** controls Z units traveled per second, defaulting to 10. Exiting at a stop without a platform lands you on the highest platform below the shaft. If there is no platform below, you remain aboard.
 
 ### Wall doors
 

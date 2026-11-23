@@ -202,6 +202,14 @@ class ItemUsePacket(BasePacket):
     itemId: str
 
 
+class ElevatorSelectFloorPacket(BasePacket):
+    """Request a configured stop from inside an elevator."""
+
+    type: Literal["elevator_select_floor"]
+    itemId: str
+    z: WorldCoordinate
+
+
 class ItemSecondaryUsePacket(BasePacket):
     type: Literal["item_secondary_use"]
     itemId: str
@@ -483,6 +491,7 @@ ClientPacket = (
     | ItemHandTargetsPacket
     | ItemUsePacket
     | ItemSecondaryUsePacket
+    | ElevatorSelectFloorPacket
     | ItemPianoNotePacket
     | ItemPianoRecordingPacket
     | ItemUpdatePacket

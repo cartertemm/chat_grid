@@ -73,6 +73,22 @@ describe('remote account identity', () => {
 });
 
 describe('item property update announcements', () => {
+  it('announces the new parked height with an accepted elevator stop list', async () => {
+    const { handler, updateStatus, state } = setupRemoteMovement();
+    const item: WorldItem = {
+      id: 'elevator', type: 'elevator', title: 'Elevator', x: 4, y: 4, z: 0,
+      createdBy: 'owner', updatedBy: 'owner', createdAt: 0, updatedAt: 0, version: 1,
+      params: { floorZs: [0, 40], currentZ: 0 }, capabilities: [], occupiedOffsets: [{ x: 0, y: 0 }],
+    };
+    state.items.set(item.id, item);
+    state.selectedItemId = item.id;
+    state.mode = 'itemProperties';
+    state.itemPropertyKeys = ['floorZs'];
+    state.itemPropertyIndex = 0;
+    await handler({ type: 'item_upsert', item: { ...item, params: { floorZs: [20, 40], currentZ: 20 } } });
+    expect(updateStatus).toHaveBeenLastCalledWith('20,40. Car parked at height 20.');
+  });
+
   it('replaces the authored world after a restore and drops stale selection', async () => {
     const { handler, state } = setupRemoteMovement();
     state.mode = 'itemProperties';
@@ -244,6 +260,30 @@ describe('remote movement audio', () => {
 });
 
 describe('item target message routing', () => {
+  it('preserves elevator landing and cabin cue positions instead of moving them to the listener floor', async () => {
+    const state = createInitialState();
+    state.player.z = 40;
+    state.player.acousticZoneId = 'floor:40';
+    const elevator: WorldItem = {
+      id: 'car', type: 'elevator', title: 'Elevator', x: 4, y: 4, z: 0,
+      createdBy: 'owner', updatedBy: 'owner', createdAt: 0, updatedAt: 0, version: 1,
+      params: { floorZs: [0, 20, 40], currentZ: 0 }, capabilities: [], occupiedOffsets: [{ x: 0, y: 0 }],
+    };
+    state.items.set(elevator.id, elevator);
+    const playWorldSound = vi.fn();
+    const handler = createOnMessageHandler({
+      state, playWorldSound, resolveIncomingSoundUrl: (url: string) => url,
+    } as unknown as Parameters<typeof createOnMessageHandler>[0]);
+    for (const acousticZoneId of ['floor:0', 'elevator:car']) {
+      const packet = {
+        type: 'item_use_sound' as const, itemId: 'car', sound: '/sounds/elevator_up.ogg',
+        x: 4, y: 4, z: 0, acousticZoneId, range: 15,
+      };
+      await handler(packet);
+      expect(playWorldSound).toHaveBeenLastCalledWith(packet.sound, packet);
+    }
+  });
+
   it('routes hand target responses separately from ownership transfer targets', async () => {
     const handleItemTransferTargets = vi.fn();
     const handleItemHandTargets = vi.fn();

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from math import isfinite
+
+from ....elevator_geometry import parse_stops
 from ....models import WorldItem
 from ...emit_validation import validate_emit_direction, validate_emit_properties
 from ...helpers import keep_only_known_params
@@ -29,9 +32,19 @@ def validate_update(item: WorldItem, next_params: dict) -> dict:
     validated["doorOpenSeconds"] = _validate_duration(
         item.params, next_params, "doorOpenSeconds", 5
     )
-    validated["travelSeconds"] = _validate_duration(
-        item.params, next_params, "travelSeconds", 5
+    validated["floorZs"] = parse_stops(
+        next_params.get("floorZs", item.params.get("floorZs", [0, 40]))
     )
+    raw_speed = next_params.get("speed", item.params.get("speed", 10))
+    try:
+        speed = float(raw_speed)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(
+            "Speed must be between 0.1 and 1000 Z units per second."
+        ) from exc
+    if isinstance(raw_speed, bool) or not isfinite(speed) or not 0.1 <= speed <= 1000:
+        raise ValueError("Speed must be between 0.1 and 1000 Z units per second.")
+    validated["speed"] = round(speed, 1)
     validated.update(validate_emit_direction(item.params, next_params))
     validated.update(validate_emit_properties(item.params, next_params))
     return keep_only_known_params(validated, PARAM_KEYS)

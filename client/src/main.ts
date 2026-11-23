@@ -49,6 +49,7 @@ import {
 } from './input/mobileController';
 import { getEditSessionAction } from './input/editSession';
 import { createOptionSelector } from './input/optionSelector';
+import { createElevatorControls } from './items/types/elevator/controls';
 import { createConfirmationController } from './input/confirmationController';
 import { formatSteppedNumber, snapNumberToStep } from './input/numeric';
 import { adjustPropertyValue, applyNumericPropertyKey, announcePropertyValue } from './input/propertyControls';
@@ -659,6 +660,13 @@ const optionSelector = createOptionSelector({
   updateStatus,
   blip: () => audio.sfxUiBlip(),
   cancel: () => audio.sfxUiCancel(),
+});
+const elevatorControls = createElevatorControls({
+  state,
+  choose: (request) => optionSelector.open(request),
+  closeChoice: (request) => optionSelector.close(request),
+  send: (packet) => signaling.send(packet),
+  updateStatus,
 });
 const confirmationController = createConfirmationController({
   state,
@@ -1865,6 +1873,7 @@ function cancelReconnect(): void {
 
 /** Tears down active session state, media, peers, and UI back to pre-connect mode. */
 function disconnect(): void {
+  elevatorControls.reset();
   worldBuilderController.resetPlatformEditor();
   cancelReconnect();
   connectionAbort?.abort();
@@ -1972,7 +1981,9 @@ const onAppMessage = createOnMessageHandler({
   handleItemHandTargets,
   handleDoorResult: doorControls.result,
   handleCheckpointResult: (message) => worldBuilderController.handleCheckpointResult(message),
+  handleElevatorStatus: (message) => elevatorControls.handleStatus(message),
   handleWorldRestored: () => {
+    elevatorControls.reset();
     worldBuilderController.resetPlatformEditor();
     worldBuilderController.resetCheckpoints(true);
     doorControls.close();
@@ -2067,6 +2078,7 @@ async function onSignalingMessage(message: IncomingMessage, onWelcome?: () => vo
   }
   itemBehaviorRegistry.onUseResultMessage(message);
   itemBehaviorRegistry.onWorldUpdate();
+  elevatorControls.reconcile();
   worldBuilderController.reconcilePlatforms();
   applyConfiguredPeerListenGains();
   if (restartAnnouncement) {
@@ -2119,6 +2131,10 @@ function getCurrentSquareItems(): WorldItem[] {
 }
 
 function getUsableInteractionItems(): WorldItem[] {
+  if (state.elevatorItemId) {
+    const elevator = state.items.get(state.elevatorItemId);
+    return elevator ? [elevator] : [];
+  }
   return getCurrentInteractionItems().filter((item) => item.capabilities.includes('usable'));
 }
 
@@ -2591,12 +2607,12 @@ function getAvailableCommandPaletteEntriesForMode(mode: GameMode): Array<Command
       hasEditableItemTarget: canEditCurrentItem(),
       hasInspectableItemTarget: canInspectCurrentItem(),
     });
-    return descriptors.map((descriptor) => ({
+    return [...elevatorControls.commands(), ...descriptors.map((descriptor) => ({
       ...descriptor,
       label: getServerMainModeCommandMetadata(descriptor.id)?.label ?? descriptor.label,
       tooltip: getServerMainModeCommandMetadata(descriptor.id)?.tooltip ?? descriptor.tooltip,
       run: mainModeCommandHandlers[descriptor.id],
-    }));
+    }))];
   }
   if (itemBehaviorRegistry.canOpenModeCommandPalette(mode)) {
     return itemBehaviorRegistry.getModeCommands(mode).map((descriptor) => ({
@@ -2974,6 +2990,7 @@ function handleAddItemModeInput(code: string, key: string): void {
     audio.sfxUiCancel();
   }
 }
+
 
 /** Handles generic selected-item list flow used by pickup/delete/edit/use/inspect contexts. */
 function handleSelectItemModeInput(code: string, key: string): void {

@@ -55,7 +55,16 @@ async def reconcile_world_restore(server: SignalingServer) -> None:
             client.elevator_id = None
             # Walls occupy edges. A valid tile remains a valid standing position.
             if not server.platform_service.contains(client.x, client.y, client.z):
-                client.x, client.y, client.z = server.platform_service.spawn()
+                landing = (
+                    server.platform_service.landing_position(
+                        client.x, client.y, client.z
+                    )
+                    if prior[3] is not None
+                    else None
+                )
+                client.x, client.y, client.z = (
+                    landing or server.platform_service.spawn()
+                )
             if (client.x, client.y, client.z, client.elevator_id) != prior:
                 server._persist_client_position(client, force=True)
                 corrected.append(client)

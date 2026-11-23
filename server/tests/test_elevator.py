@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from app.item_service import ItemService
-from app.items.types.elevator.actions import secondary_use_item
 from app.items.types.elevator.validator import validate_update
 
 from app.models import (
@@ -42,6 +42,168 @@ def test_elevator_single_square_occupies_both_floors(make_world) -> None:
     assert not server.item_runtime.item_is_on_client_square(elevator, client)
 
 
+@pytest.mark.asyncio
+async def test_multi_stop_riders_choose_unique_fifo_destinations(world, monkeypatch):
+    rider = world.join("Rider", x=10, y=10, z=0)
+    other = world.join("Other", x=10, y=10, z=0)
+    elevator = world.server.item_service.default_item(rider, "elevator")
+    elevator.params.update(floorZs=[0, 20, 40], doorOpen=True, state="door_open")
+    world.server.item_service.add_item(elevator)
+    monkeypatch.setattr(
+        world.server.item_runtime.elevator, "_restart_task", lambda _: None
+    )
+    runtime = world.server.item_runtime.elevator
+    await runtime.use(rider, elevator)
+    await runtime.use(other, elevator)
+    assert elevator.params["requestedZs"] == []
+    await runtime.select_floor(rider, elevator, 40)
+    await runtime.select_floor(other, elevator, 20)
+    version = elevator.version
+    await runtime.select_floor(other, elevator, 40)
+    assert elevator.version == version
+    assert elevator.params["requestedZs"] == [40, 20]
+    assert runtime._next_destination(elevator, 0) == 40
+    assert runtime._next_destination(elevator, 40) == 20
+    rider.elevator_id = None
+    await runtime.select_floor(rider, elevator, 0)
+    assert elevator.params["requestedZs"] == []
+    assert not world.transport.last_packet_of_type(rider, ItemActionResultPacket).ok
+
+
+@pytest.mark.asyncio
+async def test_away_call_does_not_depart_before_open_door_finishes(world):
+    caller = world.join("Caller", x=10, y=10, z=40)
+    elevator = world.server.item_service.default_item(caller, "elevator")
+    elevator.params.update(currentZ=0, doorOpen=True, state="door_open")
+    world.server.item_service.add_item(elevator)
+    await world.server.item_runtime.elevator.use(caller, elevator)
+    assert elevator.params["state"] == "door_open"
+    assert elevator.params["doorOpen"] is True
+    assert elevator.params["requestedZs"] == [40]
+    assert elevator.params["targetZ"] is None
+
+
+@pytest.mark.asyncio
+async def test_open_air_exit_lands_on_highest_surface_and_carries_items(world):
+    rider = world.join("Rider", x=10, y=10, z=80)
+    observer = world.join("Observer", x=11, y=10, z=40)
+    elevator = world.server.item_service.default_item(rider, "elevator")
+    elevator.params.update(
+        floorZs=[0, 80], currentZ=80, doorOpen=True, state="door_open"
+    )
+    world.server.item_service.add_item(elevator)
+    rider.elevator_id = elevator.id
+    held = world.server.item_service.default_item(rider, "widget")
+    held.carrierId = rider.id
+    world.server.item_service.add_item(held)
+    await world.server.item_runtime.elevator.use(rider, elevator)
+    assert rider.z == held.z == 40
+    assert rider.elevator_id is None
+    packet = world.transport.last_packet_of_type(observer, BroadcastPositionPacket)
+    assert packet.z == 40 and packet.acousticZoneId == "floor:40"
+
+
+@pytest.mark.asyncio
+async def test_open_air_exit_with_no_surface_keeps_rider_aboard(world):
+    rider = world.join("Rider", x=10, y=10, z=-20)
+    elevator = world.server.item_service.default_item(rider, "elevator")
+    elevator.params.update(
+        floorZs=[-20, 0], currentZ=-20, doorOpen=True, state="door_open"
+    )
+    world.server.item_service.add_item(elevator)
+    rider.elevator_id = elevator.id
+    await world.server.item_runtime.elevator.use(rider, elevator)
+    assert rider.z == -20 and rider.elevator_id == elevator.id
+    assert (
+        "no platform below"
+        in world.transport.last_packet_of_type(rider, ItemActionResultPacket).message
+    )
+
+
+@pytest.mark.asyncio
+async def test_travel_time_scales_with_distance_and_speed(world, monkeypatch):
+    rider = world.join("Rider")
+    elevator = world.server.item_service.default_item(rider, "elevator")
+    elevator.params["speed"] = 10
+    sleeps = []
+
+    async def record_sleep(seconds):
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(asyncio, "sleep", record_sleep)
+    await world.server.item_runtime.elevator.advance_travel(elevator, 0, 40)
+    assert sum(sleeps) == pytest.approx(4)
+    sleeps.clear()
+    await world.server.item_runtime.elevator.advance_travel(elevator, 40, -40)
+    assert sum(sleeps) == pytest.approx(8)
+    sleeps.clear()
+    elevator.params["speed"] = 0.1
+    await world.server.item_runtime.elevator.advance_travel(elevator, 0, 1)
+    assert sleeps == [10]
+
+
+def test_open_air_recovery_uses_supported_landing_or_spawn(world):
+    rider = world.join("Rider", x=10, y=10, z=70)
+    elevator = world.server.item_service.default_item(rider, "elevator")
+    elevator.params.update(floorZs=[0, 80], currentZ=80)
+    world.server.item_service.add_item(elevator)
+    rider.elevator_id = elevator.id
+    runtime = world.server.item_runtime.elevator
+    assert runtime.recovery_position(rider) == (10, 10, 40)
+    elevator.params["currentZ"] = -20
+    assert runtime.recovery_position(rider) == (0, 0, 0)
+    assert (rider.x, rider.y, rider.z) == (10, 10, 70)
+
+
+@pytest.mark.asyncio
+async def test_failed_trip_ejection_clears_browser_cabin_state(world):
+    rider = world.join("Rider", x=10, y=10, z=70)
+    elevator = world.server.item_service.default_item(rider, "elevator")
+    elevator.params.update(floorZs=[0, 80], currentZ=80, state="moving", targetZ=0)
+    world.server.item_service.add_item(elevator)
+    rider.elevator_id = elevator.id
+    await world.server.item_runtime.elevator._return_to_idle(elevator.id)
+    assert rider.elevator_id is None and rider.z == 40
+    packet = world.transport.last_packet_of_type(rider, ItemElevatorStatusPacket)
+    assert packet.event == "exited" and packet.z == 40
+    assert "stopped unexpectedly" in packet.message
+
+
+@pytest.mark.asyncio
+async def test_arrival_sets_all_riders_before_exits_and_does_not_send_stale_arrival(
+    world,
+):
+    rider = world.join("Rider", x=10, y=10, z=20)
+    other = world.join("Other", x=10, y=10, z=20)
+    elevator = world.server.item_service.default_item(rider, "elevator")
+    elevator.params.update(currentZ=40, state="door_open", doorOpen=True)
+    world.server.item_service.add_item(elevator)
+    rider.elevator_id = other.elevator_id = elevator.id
+    held = world.server.item_service.default_item(rider, "widget")
+    held.carrierId = rider.id
+    world.server.item_service.add_item(held)
+    runtime = world.server.item_runtime.elevator
+    original = runtime.callbacks.broadcast_item
+    exited = False
+
+    async def exit_during_broadcast(item):
+        nonlocal exited
+        if not exited:
+            exited = True
+            assert rider.z == other.z == held.z == 40
+            await runtime.use(rider, elevator)
+        await original(item)
+
+    runtime.callbacks = replace(runtime.callbacks, broadcast_item=exit_during_broadcast)
+    await runtime._move_occupants(elevator, 40)
+    events = world.transport.packets_of_type(rider, ItemElevatorStatusPacket)
+    assert [packet.event for packet in events] == ["exited"]
+    assert (
+        world.transport.last_packet_of_type(other, ItemElevatorStatusPacket).event
+        == "arrived"
+    )
+
+
 def test_same_xy_on_another_floor_is_not_the_same_item_square(make_world) -> None:
     """Ordinary item occupancy should compare height as well as x and y."""
 
@@ -71,7 +233,7 @@ def test_elevator_timing_and_emitter_are_editable_but_runtime_state_is_not(
             "directional": True,
             "facing": 123.4,
             "doorOpenSeconds": 8.25,
-            "travelSeconds": 12.34,
+            "speed": 12.34,
             "emitRange": 12,
             "emitVolume": 65,
             "emitSoundSpeed": 40.5,
@@ -91,7 +253,7 @@ def test_elevator_timing_and_emitter_are_editable_but_runtime_state_is_not(
             "directional",
             "facing",
             "doorOpenSeconds",
-            "travelSeconds",
+            "speed",
             "emitRange",
             "emitVolume",
             "emitSoundSpeed",
@@ -106,7 +268,7 @@ def test_elevator_timing_and_emitter_are_editable_but_runtime_state_is_not(
         "directional": True,
         "facing": 123,
         "doorOpenSeconds": 8.2,
-        "travelSeconds": 12.3,
+        "speed": 12.3,
         "emitRange": 12,
         "emitVolume": 65,
         "emitSoundSpeed": 40.5,
@@ -125,7 +287,7 @@ def test_elevator_timing_and_emitter_are_editable_but_runtime_state_is_not(
     [
         ("doorOpenSeconds", -0.1),
         ("doorOpenSeconds", 300.1),
-        ("travelSeconds", "not a number"),
+        ("speed", "not a number"),
     ],
 )
 def test_elevator_rejects_invalid_editable_durations(
@@ -155,11 +317,11 @@ def test_elevator_rejects_invalid_editable_durations(
         ),
         (
             {"currentZ": 0, "targetZ": 40, "state": "moving"},
-            "Elevator is headed to Second floor, traveling up.",
+            "Elevator is headed to Second floor, traveling up, from Ground floor.",
         ),
         (
             {"currentZ": 40, "targetZ": 0, "state": "moving"},
-            "Elevator is headed to Ground floor, traveling down.",
+            "Elevator is headed to Ground floor, traveling down, from Second floor.",
         ),
     ],
 )
@@ -174,10 +336,7 @@ def test_elevator_secondary_use_reports_simple_car_state(
     elevator = server.item_service.default_item(client, "elevator")
     elevator.params.update(params)
 
-    result = secondary_use_item(elevator, client.nickname, lambda _: "")
-
-    assert result.self_message == expected
-    assert result.others_message == ""
+    assert server.item_runtime.elevator.status(elevator) == expected
 
 
 @pytest.mark.asyncio
@@ -201,7 +360,6 @@ async def test_elevator_opens_then_second_use_enters(
     door_packets = transport.packets_of_type(observer, ItemUseSoundPacket)
     door_sounds = [packet.sound for packet in door_packets]
     assert door_sounds == [
-        "/sounds/elevator_up.ogg",
         "/sounds/elevator_open.ogg",
     ]
     assert all(packet.acousticZoneId == "floor:0" for packet in door_packets)
@@ -234,7 +392,7 @@ async def test_elevator_opens_then_second_use_enters(
     elevator.params["doorOpenSeconds"] = 8.2
     await server.item_runtime.elevator.use(client, elevator)
     assert client.elevator_id == elevator.id
-    assert elevator.params["departOnCloseZ"] == 40
+    assert elevator.params["requestedZs"] == [40]
     assert any(
         packet.event == "entered"
         for packet in transport.packets_of_type(client, ItemElevatorStatusPacket)
@@ -272,7 +430,7 @@ async def test_absent_elevator_is_called_and_moving_calls_are_queued(
     assert ground_client.elevator_id is None
 
     await server.item_runtime.elevator.use(second_client, elevator)
-    assert elevator.params["queuedZ"] == 40
+    assert elevator.params["requestedZs"] == [40]
 
     await server.item_runtime.elevator.cancel(elevator.id)
 
@@ -294,7 +452,7 @@ async def test_opposite_landing_call_is_queued_while_door_is_closing(
 
     assert client.elevator_id is None
     assert elevator.params["state"] == "closing"
-    assert elevator.params["queuedZ"] == 40
+    assert elevator.params["requestedZs"] == [40]
     result = transport.packets_of_type(client, ItemActionResultPacket)[0]
     assert result.message == "You call Elevator."
 
@@ -347,8 +505,7 @@ async def test_elevator_arrival_moves_rider_and_carried_item(
             "targetZ": 40,
             "state": "moving",
             "doorOpen": False,
-            "departOnCloseZ": None,
-            "queuedZ": None,
+            "requestedZs": [],
         }
     )
     server.item_service.add_item(elevator)
@@ -383,7 +540,6 @@ async def test_elevator_arrival_moves_rider_and_carried_item(
     assert arrival.message == "Elevator arrives on Second floor. The door opens."
     elevator_sounds = transport.packets_of_type(observer, ItemUseSoundPacket)
     assert [packet.sound for packet in elevator_sounds] == [
-        "/sounds/elevator_down.ogg",
         "/sounds/elevator_open.ogg",
         "/sounds/elevator_close.ogg",
     ]
@@ -392,29 +548,38 @@ async def test_elevator_arrival_moves_rider_and_carried_item(
     assert (ELEVATOR_DOOR_CLOSE_SOUND_SECONDS, "closing") in sleeps
     close_index = sleeps.index((ELEVATOR_DOOR_CLOSE_SOUND_SECONDS, "closing"))
     assert all(state == "moving" for _, state in sleeps[close_index + 1 :])
-    opening_sound = elevator_sounds[1]
+    opening_sound = elevator_sounds[0]
     assert (opening_sound.x, opening_sound.y, opening_sound.z) == (10, 10, 40)
     assert opening_sound.acousticZoneId == "floor:40"
 
 
 @pytest.mark.asyncio
-async def test_elevator_door_sound_announces_next_upward_trip(
+async def test_elevator_departure_direction_reaches_cabin_and_landing_once(
     make_world,
 ) -> None:
-    """A ground-floor door opening should announce the next upward trip."""
+    """A closed car's departure cue reaches riders without leaking its zone."""
 
     world = make_world(grid_size=41)
     server, transport = world.server, world.transport
     observer = world.join("observer", x=40, y=40)
     client = world.join("tester", x=10, y=10, z=40, client_id="u1")
     elevator = server.item_service.default_item(client, "elevator")
+    rider = world.join("rider", x=10, y=10, z=0, elevator_id=elevator.id)
 
+    elevator.params["targetZ"] = 40
+    elevator.params["state"] = "moving"
+    elevator.params["doorOpen"] = False
     await server.item_runtime.elevator.broadcast_direction_sound(elevator, 0)
 
-    arrival_sound = transport.packets_of_type(observer, ItemUseSoundPacket)[0]
-    assert arrival_sound.sound == "/sounds/elevator_up.ogg"
-    assert arrival_sound.z == 0
-    assert arrival_sound.acousticZoneId == "floor:0"
+    landing_sounds = transport.packets_of_type(observer, ItemUseSoundPacket)
+    assert len(landing_sounds) == 1
+    assert landing_sounds[0].sound == "/sounds/elevator_up.ogg"
+    assert landing_sounds[0].z == 0
+    assert landing_sounds[0].acousticZoneId == "floor:0"
+    cabin_sounds = transport.packets_of_type(rider, ItemUseSoundPacket)
+    assert len(cabin_sounds) == 1
+    assert cabin_sounds[0].sound == "/sounds/elevator_up.ogg"
+    assert cabin_sounds[0].acousticZoneId == f"elevator:{elevator.id}"
 
 
 @pytest.mark.asyncio
@@ -432,7 +597,7 @@ async def test_elevator_waits_for_closing_sound_before_travel(
         {
             "state": "closing",
             "doorOpen": False,
-            "departOnCloseZ": 40,
+            "requestedZs": [40],
         }
     )
     server.item_service.add_item(elevator)
@@ -475,7 +640,7 @@ async def test_editable_elevator_durations_drive_runtime_timing(
             "state": "door_open",
             "doorOpen": True,
             "doorOpenSeconds": 7.5,
-            "travelSeconds": 1.25,
+            "speed": 1.25,
         }
     )
     server.item_service.add_item(elevator)
@@ -491,7 +656,7 @@ async def test_editable_elevator_durations_drive_runtime_timing(
 
     sleeps.clear()
     await server.item_runtime.elevator.advance_travel(elevator, 0, 0)
-    assert sleeps == [1.25]
+    assert sleeps == [0.0]
 
 
 @pytest.mark.asyncio
@@ -525,7 +690,6 @@ async def test_stopped_rider_waits_for_reopened_door_before_exiting(
         for packet in transport.packets_of_type(observer, ItemUseSoundPacket)
     ]
     assert door_sounds == [
-        "/sounds/elevator_down.ogg",
         "/sounds/elevator_open.ogg",
     ]
 
@@ -574,7 +738,7 @@ async def test_rider_cannot_exit_while_elevator_is_moving(
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("origin_z", "destination_z", "first_height", "last_height"),
-    [(0, 40, 1, 38), (40, 0, 39, 2)],
+    [(0, 40, 2, 38), (40, 0, 38, 2)],
 )
 async def test_elevator_travel_height_progresses_between_acoustic_floors(
     make_world,
@@ -673,8 +837,7 @@ def test_persisted_elevator_resets_to_resting_state(tmp_path: Path) -> None:
                         "floorZs": [0, 40],
                         "currentZ": 0,
                         "targetZ": 40,
-                        "queuedZ": 0,
-                        "departOnCloseZ": 40,
+                        "requestedZs": [40],
                         "state": "moving",
                         "doorOpen": False,
                     },
@@ -688,12 +851,11 @@ def test_persisted_elevator_resets_to_resting_state(tmp_path: Path) -> None:
 
     assert elevator.params["currentZ"] == 0
     assert elevator.params["targetZ"] is None
-    assert elevator.params["queuedZ"] is None
-    assert elevator.params["departOnCloseZ"] is None
+    assert elevator.params["requestedZs"] == []
     assert elevator.params["state"] == "idle"
     assert elevator.params["doorOpen"] is False
     assert elevator.params["doorOpenSeconds"] == 5
-    assert elevator.params["travelSeconds"] == 5
+    assert elevator.params["speed"] == 10
     assert elevator.z == 0
 
 

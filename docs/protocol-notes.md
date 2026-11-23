@@ -85,6 +85,7 @@ This is a behavior guide for packet semantics beyond raw schemas.
 - `item_piano_note`: broadcast piano note on/off with resolved instrument/envelope/spatial params.
 - `item_piano_status`: structured piano mode/record/playback state events for client runtime control.
 - `item_elevator_status`: targeted rider state (`entered`, `moving`, `arrived`, or `exited`) with `itemId`, `z`, and an optional user-facing `message`.
+- `elevator_select_floor` carries `itemId` and integer `z`. The server accepts a request from a current rider for a configured stop and replies through the existing item-use result path. Accepted destinations join the car's ordered queue. Invalid or stale requests leave the current trip intact.
 - `structure_upsert`: full wall-run replacement after a live create, resize, slide, rotation, or property update.
 - `structure_remove`: removal of one wall run.
 - `structure_action_result`: success/error and user-facing status for add, resize, slide, rotate, update, or delete. Successful edit results contain only the authoritative new coordinate/property value so shared controls do not receive a second narrative announcement.
@@ -117,7 +118,7 @@ This is a behavior guide for packet semantics beyond raw schemas.
 - `item_upsert.item.occupiedOffsets` contains the server-owned horizontal footprint relative to the item anchor.
 - Elevator travel sends progressive intermediate `update_position.z` values so rider coordinates advance throughout the trip while remaining outside both floor audio and visibility groups until arrival.
 - Elevator entry and exit also broadcast `update_position` even when coordinates do not change, so every client updates the rider's acoustic-zone membership immediately.
-- Elevator opening, closing, and direction cues send one `item_use_sound` in the current landing's floor zone; the direction cue is sent immediately before opening so both sounds overlap. Landing listeners hear these external sources directly, while riders hear the same source through the opening/closing door transmission.
+- Elevator opening and closing cues send `item_use_sound` at the car's current landing in that landing's floor zone. Departure direction cues use the actual destination. The server sends a landing-zone cue to outside listeners and a targeted cabin-zone copy to riders so the direction remains audible with the door closed. The client preserves these packets' position and acoustic zone across all configured stops.
 
 ## Welcome Metadata
 

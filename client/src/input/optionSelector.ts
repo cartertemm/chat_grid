@@ -71,5 +71,13 @@ export function createOptionSelector(deps: OptionSelectorDeps) {
     }
   }
 
-  return { open, handleInput };
+  /** Close a selector owned by a feature without disturbing a newer menu. */
+  function close(active: OptionSelectorRequest): boolean {
+    if (request !== active) return false;
+    request = null;
+    if (deps.state.mode === 'optionSelect') deps.state.mode = 'normal';
+    return true;
+  }
+
+  return { open, handleInput, close };
 }

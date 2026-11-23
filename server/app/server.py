@@ -35,6 +35,7 @@ from .acoustic_zones import (
 )
 from .region_service import RegionError, RegionService
 from .platform_service import PlatformError, PlatformService
+from .elevator_geometry import validate_shaft_support
 from .items.types.teleporter.validator import parse_destination
 from .models import (
     PlatformAddPacket,
@@ -511,8 +512,13 @@ class SignalingServer:
             )
             if now_ms - last_saved_ms < POSITION_PERSIST_DEBOUNCE_MS:
                 return
+        position = (
+            self.item_runtime.elevator.recovery_position(client)
+            if client.elevator_id
+            else (client.x, client.y, client.z)
+        )
         self.auth_service.set_last_position(
-            client.user_id, client.x, client.y, client.z, client.facing_deg
+            client.user_id, *position, client.facing_deg
         )
         self._last_position_persist_ms_by_user[client.user_id] = now_ms
 
@@ -980,7 +986,7 @@ class SignalingServer:
     def _floor_name(self, x: int, y: int, z: int) -> str:
         """Name the standing surface at an item's specific landing."""
         platform = self.platform_service.platform_at(x, y, z)
-        return platform.name if platform else f"z {z}"
+        return platform.name if platform else f"open air at z {z}"
 
     def _movement_window_index(self, now_ms: int) -> int:
         """Return current movement rate-limit window index for a server timestamp."""
@@ -1814,13 +1820,18 @@ class SignalingServer:
         ):
             raise PlatformError("The world's spawn needs platform support.")
         for client in self.clients.values():
-            if not relocate_players and not geometry.contains(
-                client.x, client.y, client.z
+            if (
+                not relocate_players
+                and client.elevator_id is None
+                and not geometry.contains(client.x, client.y, client.z)
             ):
                 raise PlatformError(
                     f"{client.nickname} is standing on the affected platform."
                 )
         for item in self.items.values():
+            if item.type == "elevator":
+                validate_shaft_support(item, geometry)
+                continue
             end_x = getattr(item, "endX", None)
             end_y = getattr(item, "endY", None)
             width = (item.x if end_x is None else end_x) - item.x + 1
@@ -1840,14 +1851,6 @@ class SignalingServer:
                 item.x, item.y, item.x + width - 1, item.y + depth - 1, item.z
             ):
                 raise PlatformError(f"{item.title} needs platform support.")
-            if item.type == "elevator":
-                if any(
-                    not geometry.contains(item.x, item.y, int(z))
-                    for z in item.params.get("floorZs", [0, 40])
-                ):
-                    raise PlatformError(
-                        f"{item.title} needs a platform at each landing."
-                    )
             if item.type == "teleporter":
                 destination = parse_destination(
                     item.params.get("destination", "0, 0, 0")

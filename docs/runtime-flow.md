@@ -4,7 +4,7 @@
 
 Platforms are flat rectangles in shared world coordinates. Both corners are inclusive. A new default world starts with two 41-by-41 platforms at elevations 0 and 40. The configured grid size sets the dimensions used when seeding an older world. Builders can add connected rooms, narrow bridges, or detached islands at signed coordinates. Rectangles at one elevation may share an edge, and rectangles at different elevations may cover the same horizontal space.
 
-Movement prediction and server validation check the destination cell. A diagonal step also requires both neighboring orthogonal cells. Wall and door checks apply across a platform seam. A platform introduces no acoustic boundary on its own. List travel to another platform at the same elevation sends a single landing request, so crossing a gap never creates an intermediate standing position. Teleporters can connect different elevations. Existing elevators retain their two configured stops.
+Movement prediction and server validation check the destination cell. A diagonal step also requires both neighboring orthogonal cells. Wall and door checks apply across a platform seam. A platform introduces no acoustic boundary on its own. List travel to another platform at the same elevation sends a single landing request, so crossing a gap never creates an intermediate standing position. Teleporters can connect different elevations. Elevators can connect configured stop elevations and open-air stops.
 
 Location announcements use the name of the platform under the reported position. The canvas follows the local player on larger maps. A platform checkpoint restores its geometry together with the objects that depend on it.
 
@@ -146,6 +146,10 @@ Core incoming message effects:
 
 ## Floors And Elevators
 
+The item editor accepts a comma-delimited Stops list, default `0,40`, and exposes Speed in Z units per second. Two-stop boarding selects the other stop. Three or more stops open the common destination selector. Riders can reopen it through Choose floor. Dismissing the list leaves the player aboard. Calls and rider selections join one server-owned queue in acceptance order, with duplicate stops coalesced.
+
+Exiting a fully open car clears cabin membership only when a supported landing can be found. An open-air stop lands on the highest platform strictly below the shaft X/Y, including elevations absent from Stops. If there is no platform below, the rider stays aboard. Facing and carried dimensions are preserved, and final placement is persisted and broadcast.
+
 - World positions use integer `x`, `y`, and `z`. Ground is `z=0`; the second floor is `z=40`.
 - Player facing uses eight headings in degrees: `0` north (`+y`), `45` northeast, `90` east (`+x`), `135` southeast, `180` south, `225` southwest, `270` west, and `315` northwest. Turns in either audio mode change facing; movement, blocked movement, teleports, and elevator travel preserve it.
 - Normal movement and client-requested teleport packets must keep the server-owned `z`. Elevators and server-authorized item teleport transitions can change floors.
@@ -153,15 +157,15 @@ Core incoming message effects:
 - Cross-floor user teleport is blocked in the client, and the server rejects any packet that attempts to change `z` directly.
 - Presence snapshots and position updates include a server-authoritative `acousticZoneId`. A user belongs to a floor zone while outside and to an elevator-cabin zone after boarding, including during travel.
 - Floors remain acoustically isolated. LiveKit subscriptions use coarse zone connectivity, while local gain continuously mixes voice across a connected elevator doorway.
-- Each elevator is one independent single-square shaft object at the same coordinate on both landings. Calls, doors, queueing, travel, rider movement, and carried-item movement are server-owned.
-- Opening and closing are explicit server-owned, non-traversable states whose durations match their sound assets. After opening finishes, the fully open dwell uses the elevator's editable `doorOpenSeconds`; after closing finishes, floor travel uses its editable `travelSeconds`. Both default to five seconds. During travel, riders are broadcast at progressively changing intermediate heights and belong to neither floor.
+- Each elevator is one independent single-square shaft object at the same X/Y on every configured stop. Calls, doors, queueing, travel, rider movement, and carried-item movement are server-owned.
+- Opening and closing are explicit server-owned, non-traversable states whose durations match their sound assets. After opening finishes, the fully open dwell uses the elevator's editable `doorOpenSeconds`; after closing finishes, travel takes the elevation difference divided by editable `speed`, default 10 Z units per second. The default open dwell is five seconds. During travel, riders are broadcast at progressively changing intermediate heights and belong to neither floor.
 - The elevator object's own `z` remains canonical while rider and car travel heights change separately.
-- Arrival starts the next-direction cue and opening sound together while riders remain acoustically inside. When opening finishes, the server marks the door open, moves riders onto the destination floor, and sends the arrival announcement. A rider who remains after closing must reopen the door, wait for opening to finish, and use again to exit.
+- Arrival starts the opening sound while riders remain acoustically inside. Direction cues use an actual pending destination, including at a middle stop. When opening finishes, the server marks the door open, moves riders onto the destination floor, and sends the arrival announcement. A rider who remains after closing must reopen the door, wait for opening to finish, and use again to exit.
 - The client-owned elevator audio runtime loops the built-in interior ambience from a randomized file offset. Passengers hear it at full cabin level. Nearby landing users hear it fade in during opening and fade out during closing.
 - Continuous floor item emitters, radios, and voices crossing between a cabin and its current landing use that same door-transmission ramp. Continuous sources remain alive through the ramp instead of restarting at each door state.
 - On startup, any incomplete persisted elevator timer is cleared and the car becomes closed and idle at its last completed landing.
-- If an elevator timer step fails while running, the server logs the error and the car becomes closed and idle at its last completed landing, with its riders and their carried items placed there, so it can be called again without a restart.
-- A process restart also drops items whose connection-scoped carrier no longer exists; a carried item caught at an intermediate travel height returns to the ground floor.
+- If a timer fails, the car parks closed at its last completed stop and clears its requests. Riders and their carried items return there. If that stop opens into air, the server releases riders onto the highest platform below the shaft or uses the world spawn when there is none.
+- A process restart also drops items whose connection-scoped carrier no longer exists at a supported placement. Rider recovery checks the actual platforms and uses the world fallback when needed.
 
 ## Disconnect/Cleanup
 

@@ -349,17 +349,15 @@ class WorldStateStore:
                 geometry = PlatformService(state_file=None)
                 geometry.restore_state(normalized["platforms"])
                 for item in cast(list[dict], normalized.get("items", [])):
+                    if item["type"] == "elevator":
+                        # ItemService.restore_state validated the shaft against the staged platforms.
+                        continue
                     end_x = item.get("endX", item["x"])
                     end_y = item.get("endY", item["y"])
                     if not geometry.covers_rectangle(
                         item["x"], item["y"], end_x, end_y, item["z"]
                     ):
                         raise ValueError("Checkpoint item has no platform support.")
-                    if item["type"] == "elevator" and any(
-                        not geometry.contains(item["x"], item["y"], z)
-                        for z in item.get("params", {}).get("floorZs", [0, 40])
-                    ):
-                        raise ValueError("Checkpoint elevator landing has no platform.")
                     if item["type"] == "teleporter":
                         from .items.types.teleporter.validator import parse_destination
 
