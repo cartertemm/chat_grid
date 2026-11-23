@@ -52,6 +52,38 @@ describe('shared menu controllers', () => {
     expect(onSelect).toHaveBeenCalledWith('glass');
   });
 
+  it('keeps the highlighted option when an owned list changes order', () => {
+    const shared = deps();
+    const onSelect = vi.fn();
+    const selector = createOptionSelector(shared);
+    const request = {
+      title: 'Floors', options: [{ id: '20', label: 'Twenty' }, { id: '40', label: 'Forty' }],
+      onSelect, onCancel: vi.fn(),
+    };
+    selector.open(request);
+    selector.handleInput('ArrowDown', 'ArrowDown');
+    const next = { ...request, options: [{ id: '40', label: 'Forty, up' }, { id: '60', label: 'Sixty' }] };
+    expect(selector.refresh(request, next)).toBe(true);
+    expect(shared.announceMenuEntry).toHaveBeenLastCalledWith('Floors', 'Forty, up');
+    selector.handleInput('Enter', 'Enter');
+    expect(onSelect).toHaveBeenCalledWith('40');
+    expect(selector.refresh(request, next)).toBe(false);
+  });
+
+  it('keeps a valid nearby row when the highlighted option disappears', () => {
+    const shared = deps();
+    const onSelect = vi.fn();
+    const selector = createOptionSelector(shared);
+    const request = {
+      title: 'Floors', selectedId: '40', options: [{ id: '20', label: 'Twenty' }, { id: '40', label: 'Forty' }],
+      onSelect, onCancel: vi.fn(),
+    };
+    selector.open(request);
+    selector.refresh(request, { ...request, options: [{ id: '20', label: 'Twenty' }] });
+    selector.handleInput('Enter', 'Enter');
+    expect(onSelect).toHaveBeenCalledWith('20');
+  });
+
   it('uses the shared default-No confirmation without tooltip handling', () => {
     const shared = deps();
     const onConfirm = vi.fn();

@@ -467,7 +467,6 @@ let lastSubscriptionRefreshTileY = Math.round(state.player.y);
 let lastSubscriptionRefreshTileZ = state.player.z;
 let subscriptionRefreshInFlight = false;
 let subscriptionRefreshPending = false;
-let suppressItemPropertyEchoUntilMs = 0;
 let activeTeleportLoopStop: (() => void) | null = null;
 let activeTeleportLoopToken = 0;
 let mobileControls: MobileController | null = null;
@@ -665,6 +664,7 @@ const elevatorControls = createElevatorControls({
   state,
   choose: (request) => optionSelector.open(request),
   closeChoice: (request) => optionSelector.close(request),
+  refreshChoice: (active, next) => optionSelector.refresh(active, next),
   send: (packet) => signaling.send(packet),
   updateStatus,
 });
@@ -708,6 +708,7 @@ const worldBuilderController = createWorldBuilderController({
   openConfirmation: (request) => confirmationController.open(request),
 });
 const itemInteractionController = createItemInteractionController({
+  onBeginProperties: () => itemPropertyEditor.reset(),
   state,
   signalingSend: (message) => signaling.send(message),
   announceMenuEntry,
@@ -1873,6 +1874,7 @@ function cancelReconnect(): void {
 
 /** Tears down active session state, media, peers, and UI back to pre-connect mode. */
 function disconnect(): void {
+  itemPropertyEditor.reset();
   elevatorControls.reset();
   worldBuilderController.resetPlatformEditor();
   cancelReconnect();
@@ -1949,7 +1951,7 @@ const onAppMessage = createOnMessageHandler({
   playWorldSoundSequence: (urls, source) => {
     void worldAudio.playSequence(urls, source);
   },
-  handleItemActionResultStatus: (message) => itemBehaviorRegistry.onActionResultStatus(message),
+  handleItemActionResultStatus: (message) => itemPropertyEditor.handleActionResult(message) || itemBehaviorRegistry.onActionResultStatus(message),
   handleItemBehaviorIncomingMessage: (message) => itemBehaviorRegistry.onIncomingMessage(message),
   handleItemBehaviorPeerLeft: (senderId) => itemBehaviorRegistry.onPeerLeft(senderId),
   TELEPORT_SOUND_URL,
@@ -1968,7 +1970,7 @@ const onAppMessage = createOnMessageHandler({
   recomputeActiveItemPropertyKeys,
   getItemPropertyValue,
   getItemById: (itemId) => state.items.get(itemId),
-  shouldAnnounceItemPropertyEcho: () => Date.now() >= suppressItemPropertyEchoUntilMs,
+  shouldAnnounceItemPropertyEcho: (itemId) => itemPropertyEditor.shouldAnnounceEcho(itemId),
   playLocateToneAt: (x, y) => audio.sfxLocate({ x: x - state.player.x, y: y - state.player.y }),
   resolveIncomingSoundUrl,
   handleAuthRequired,
@@ -1983,6 +1985,7 @@ const onAppMessage = createOnMessageHandler({
   handleCheckpointResult: (message) => worldBuilderController.handleCheckpointResult(message),
   handleElevatorStatus: (message) => elevatorControls.handleStatus(message),
   handleWorldRestored: () => {
+    itemPropertyEditor.reset();
     elevatorControls.reset();
     worldBuilderController.resetPlatformEditor();
     worldBuilderController.resetCheckpoints(true);
@@ -2036,6 +2039,7 @@ async function onSignalingMessage(message: IncomingMessage, onWelcome?: () => vo
   let connectedAnnouncement: string | null = null;
   let playSelfLoginSound = false;
   if (message.type === 'welcome') {
+    itemPropertyEditor.reset();
     applyGridBranding(message.serverInfo?.gridName, message.serverInfo?.welcomeMessage);
     const uiAdminActions =
       (message.uiDefinitions as { adminMenu?: { actions?: Array<{ id: string; label: string }> } } | undefined)?.adminMenu?.actions ??
@@ -3061,9 +3065,6 @@ const itemPropertyEditor = createItemPropertyEditor({
   applyTextInputEdit,
   setReplaceTextOnNextType: (value) => {
     replaceTextOnNextType = value;
-  },
-  suppressItemPropertyEchoMs: (ms) => {
-    suppressItemPropertyEchoUntilMs = Math.max(suppressItemPropertyEchoUntilMs, Date.now() + Math.max(0, ms));
   },
   onPreviewPropertyChange: (item, key, value) => {
     itemBehaviorRegistry.onPropertyPreviewChange(item, key, value);

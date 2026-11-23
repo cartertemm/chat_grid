@@ -232,6 +232,7 @@ class ItemPianoRecordingPacket(BasePacket):
 class ItemUpdatePacket(BasePacket):
     type: Literal["item_update"]
     itemId: str
+    requestId: str | None = Field(default=None, max_length=128)
     title: str | None = Field(default=None, max_length=80)
     params: dict | None = None
 
@@ -919,6 +920,7 @@ class ItemActionResultPacket(BasePacket):
     ]
     message: str
     itemId: str | None = None
+    requestId: str | None = None
 
 
 class ItemTransferTargetSummary(BaseModel):

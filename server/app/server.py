@@ -3136,7 +3136,12 @@ class SignalingServer:
             client, "item_updates"
         ):
             await self.item_runtime.send_result(
-                client, False, "update", ITEM_CHANGE_RATE_LIMIT_MESSAGE, packet.itemId
+                client,
+                False,
+                "update",
+                ITEM_CHANGE_RATE_LIMIT_MESSAGE,
+                packet.itemId,
+                request_id=packet.requestId,
             )
             return
         if await self.item_runtime.handle_packet(client, packet):

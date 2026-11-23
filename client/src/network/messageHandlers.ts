@@ -77,7 +77,7 @@ type MessageHandlerDeps = {
   recomputeActiveItemPropertyKeys: (itemId: string) => void;
   getItemPropertyValue: (item: WorldItem, key: string) => string;
   getItemById: (itemId: string) => WorldItem | undefined;
-  shouldAnnounceItemPropertyEcho: () => boolean;
+  shouldAnnounceItemPropertyEcho: (itemId: string) => boolean;
   playLocateToneAt: (x: number, y: number) => void;
   resolveIncomingSoundUrl: (url: string) => string;
   handleAuthRequired: (message: Extract<IncomingMessage, { type: 'auth_required' }>) => void;
@@ -412,7 +412,7 @@ export function createOnMessageHandler(deps: MessageHandlerDeps): (message: Inco
           if (
             key && previousItem &&
             value !== deps.getItemPropertyValue(previousItem, key) &&
-            deps.shouldAnnounceItemPropertyEcho()
+            deps.shouldAnnounceItemPropertyEcho(message.item.id)
           ) {
             const parkedZ = message.item.type === 'elevator' && key === 'floorZs'
               && previousItem.params.currentZ !== message.item.params.currentZ

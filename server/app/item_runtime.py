@@ -6,6 +6,7 @@ import asyncio
 import logging
 import uuid
 from copy import deepcopy
+from functools import partial
 from datetime import datetime, timezone
 from typing import Literal, Protocol
 
@@ -1437,12 +1438,13 @@ class ItemRuntime:
     ) -> None:
         """Handle one update item packet."""
 
+        send_result = partial(self.send_result, request_id=packet.requestId)
         update_item = self.items.get(packet.itemId)
         if not update_item:
-            await self.send_result(client, False, "update", "Item not found.")
+            await send_result(client, False, "update", "Item not found.")
             return
         if update_item.carrierId not in (None, client.id):
-            await self.send_result(
+            await send_result(
                 client,
                 False,
                 "update",
@@ -1453,7 +1455,7 @@ class ItemRuntime:
         if update_item.carrierId is None and (
             not self.item_is_on_client_square(update_item, client)
         ):
-            await self.send_result(
+            await send_result(
                 client,
                 False,
                 "update",
@@ -1466,7 +1468,7 @@ class ItemRuntime:
             client, "item.edit.own"
         ) and self._owns_item(client, update_item)
         if not can_edit_any and not can_edit_own:
-            await self.send_result(
+            await send_result(
                 client,
                 False,
                 "update",
@@ -1484,7 +1486,7 @@ class ItemRuntime:
         if packet.title is not None:
             title = packet.title.strip()
             if not title:
-                await self.send_result(
+                await send_result(
                     client,
                     False,
                     "update",
@@ -1515,9 +1517,7 @@ class ItemRuntime:
                         "The item footprint does not fit on the platforms."
                     )
             except ValueError as exc:
-                await self.send_result(
-                    client, False, "update", str(exc), update_item.id
-                )
+                await send_result(client, False, "update", str(exc), update_item.id)
                 return
             next_params = {**update_item.params, **incoming_params}
             handler = get_item_type_handler(update_item.type)
@@ -1553,9 +1553,7 @@ class ItemRuntime:
                     if error:
                         raise ValueError(error)
             except ValueError as exc:
-                await self.send_result(
-                    client, False, "update", str(exc), update_item.id
-                )
+                await send_result(client, False, "update", str(exc), update_item.id)
                 return
             update_item.params = next_params
         current_item.title = update_item.title
@@ -1589,7 +1587,7 @@ class ItemRuntime:
             and previous_stop != update_item.params["currentZ"]
         ):
             result_message += f" Car parked at height {update_item.params['currentZ']}."
-        await self.send_result(client, True, "update", result_message, update_item.id)
+        await send_result(client, True, "update", result_message, update_item.id)
         return
 
     @staticmethod
@@ -1822,6 +1820,8 @@ class ItemRuntime:
         ],
         message: str,
         item_id: str | None = None,
+        *,
+        request_id: str | None = None,
     ) -> None:
         """Send a structured item action result to one client."""
 
@@ -1833,6 +1833,7 @@ class ItemRuntime:
                 action=action,
                 message=message,
                 itemId=item_id,
+                requestId=request_id,
             ),
         )
 
