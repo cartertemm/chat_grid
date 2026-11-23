@@ -57,6 +57,21 @@ function setupRemoteMovement() {
   };
 }
 
+describe('remote account identity', () => {
+  it('learns newly joining accounts and preserves identity across ordinary movement', async () => {
+    const { handler, state } = setupRemoteMovement();
+    const position = { type: 'update_position' as const, id: 'new-session', x: 3, y: 3, z: 0, facingDeg: 0 as const, acousticZoneId: 'floor:0' };
+    await handler(incomingMessageSchema.parse({ ...position, userId: 'speaker-account' }));
+    expect(state.peers.get('new-session')?.userId).toBe('speaker-account');
+    await handler(incomingMessageSchema.parse({ ...position, x: 4 }));
+    expect(state.peers.get('new-session')?.userId).toBe('speaker-account');
+    await handler(incomingMessageSchema.parse({ ...position, id: 'placeholder' }));
+    expect(state.peers.get('placeholder')?.userId).toBeNull();
+    await handler(incomingMessageSchema.parse({ ...position, id: 'placeholder', userId: 'late-account' }));
+    expect(state.peers.get('placeholder')?.userId).toBe('late-account');
+  });
+});
+
 describe('item property update announcements', () => {
   function selectedItem(): WorldItem {
     return {

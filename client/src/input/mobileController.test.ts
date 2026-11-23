@@ -31,8 +31,10 @@ function setupHarness() {
         <button id="chat" type="button"></button>
         <button id="commands" type="button"></button>
         <button id="mute" type="button"></button>
+        <button id="selectedUserRow" type="button" hidden></button>
         <dialog id="commandDialog">
           <button id="commandClose" type="button"></button>
+          <h2 id="commandTitle"></h2>
           <div id="commandList"></div>
         </dialog>
       </div>
@@ -43,6 +45,7 @@ function setupHarness() {
   let muted = false;
   let textValue = '';
   let customTextEntry: MobileTextEntry | null = null;
+  let selectedUserLabel: string | null = null;
   const dispatched: string[] = [];
   const savedEnabled: boolean[] = [];
   const savedExpanded: boolean[] = [];
@@ -65,7 +68,9 @@ function setupHarness() {
       chat: element('chat'),
       commands: element('commands'),
       mute: element('mute'),
+      selectedUserRow: element<HTMLButtonElement>('selectedUserRow'),
       commandDialog,
+      commandTitle: element('commandTitle'),
       commandList: element('commandList'),
       commandClose: element('commandClose'),
       textForm: element('textForm'),
@@ -88,7 +93,16 @@ function setupHarness() {
               run: () => { dispatched.push('run:test-command'); },
             },
           ]
-        : [],
+        : mode === 'listUsers'
+          ? [{
+              id: 'mute-user',
+              label: 'Mute voice for me',
+              section: 'User actions',
+              tooltip: 'Mute this user for you.',
+              run: () => { dispatched.push('run:mute-user'); },
+            }]
+          : [],
+    getSelectedUserLabel: () => selectedUserLabel,
     dispatchInput: (input) => {
       dispatched.push(input.code);
       if (mode === 'chat' && (input.code === 'Enter' || input.code === 'Escape')) mode = 'normal';
@@ -125,6 +139,7 @@ function setupHarness() {
     },
     getTextValue: () => textValue,
     setCustomTextEntry: (value: MobileTextEntry) => { customTextEntry = value; },
+    setSelectedUser: (label: string | null) => { selectedUserLabel = label; },
   };
 }
 
@@ -216,6 +231,46 @@ describe('mobile controls', () => {
     element('commandList').querySelector<HTMLButtonElement>('button')?.click();
     expect(element<HTMLDialogElement>('commandDialog').open).toBe(false);
     expect(harness.dispatched).toContain('run:test-command');
+  });
+
+  it('opens selected-user actions from the row even when the dock is disabled', () => {
+    const harness = setupHarness();
+    harness.setMode('listUsers');
+    harness.setSelectedUser('Alex');
+    harness.controller.sync();
+    const row = element<HTMLButtonElement>('selectedUserRow');
+    expect(row.hidden).toBe(false);
+    expect(row.textContent).toBe('Alex');
+    row.click();
+    expect(element<HTMLDialogElement>('commandDialog').open).toBe(true);
+    expect(element('commandTitle').textContent).toBe('User actions');
+    expect(element('commandList').textContent).toContain('Mute voice for me');
+    element('commandList').querySelector<HTMLButtonElement>('button')?.click();
+    expect(harness.dispatched).toContain('run:mute-user');
+  });
+
+  it('opens selected-user actions with the context-menu pointer gesture', () => {
+    const harness = setupHarness();
+    harness.setMode('listUsers');
+    harness.setSelectedUser('Alex');
+    harness.controller.sync();
+    const event = new Event('contextmenu', { bubbles: true, cancelable: true });
+    element('selectedUserRow').dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(element<HTMLDialogElement>('commandDialog').open).toBe(true);
+  });
+
+  it('opens selected-user actions from the focused row Applications key', () => {
+    const harness = setupHarness();
+    harness.setMode('listUsers');
+    harness.setSelectedUser('Alex');
+    harness.controller.sync();
+    const row = element<HTMLButtonElement>('selectedUserRow');
+    row.focus();
+    const event = new KeyboardEvent('keydown', { code: 'ContextMenu', bubbles: true, cancelable: true });
+    row.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(element<HTMLDialogElement>('commandDialog').open).toBe(true);
   });
 
   it('persists dock visibility and expansion choices', () => {

@@ -40,7 +40,7 @@ type MessageHandlerDeps = {
     instructions: HTMLElement;
   };
   peerManager: {
-    ensurePeer: (id: string, user: { id: string; nickname: string; x: number; y: number; z: number; facingDeg: number; acousticZoneId: string }) => unknown;
+    ensurePeer: (id: string, user: { id: string; userId?: string | null; nickname: string; x: number; y: number; z: number; facingDeg: number; acousticZoneId: string }) => unknown;
     setPeerPosition: (id: string, x: number, y: number, z: number, acousticZoneId: string) => void;
     setListenerFloor: (z: number) => void;
     setPeerNickname: (id: string, nickname: string) => void;
@@ -193,8 +193,9 @@ export function createOnMessageHandler(deps: MessageHandlerDeps): (message: Inco
         deps.dom.canvas.focus();
 
         for (const user of message.users) {
-          deps.state.peers.set(user.id, { ...user });
-          deps.peerManager.ensurePeer(user.id, user);
+          const rosterPeer = { ...user, userId: user.userId ?? null };
+          deps.state.peers.set(user.id, rosterPeer);
+          deps.peerManager.ensurePeer(user.id, rosterPeer);
         }
         deps.state.items.clear();
         for (const item of message.items || []) {
@@ -251,6 +252,7 @@ export function createOnMessageHandler(deps: MessageHandlerDeps): (message: Inco
         const prevX = peer?.x ?? message.x;
         const prevY = peer?.y ?? message.y;
         if (peer) {
+          if (message.userId !== undefined) peer.userId = message.userId;
           peer.x = message.x;
           peer.y = message.y;
           peer.z = message.z;
@@ -259,7 +261,7 @@ export function createOnMessageHandler(deps: MessageHandlerDeps): (message: Inco
         } else {
           deps.state.peers.set(message.id, {
             id: message.id,
-            userId: null,
+            userId: message.userId ?? null,
             nickname: 'user...',
             x: message.x,
             y: message.y,

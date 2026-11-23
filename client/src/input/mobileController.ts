@@ -1,4 +1,4 @@
-import type { ModeInput } from './commandTypes';
+import { opensActionMenu, type ModeInput } from './commandTypes';
 import type { GameMode } from '../state/gameState';
 
 type DirectionCode = 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight';
@@ -35,7 +35,10 @@ type MobileControllerDeps = {
     chat: HTMLButtonElement;
     commands: HTMLButtonElement;
     mute: HTMLButtonElement;
+    /** Optional contextual entry point shown for the selected user row. */
+    selectedUserRow?: HTMLButtonElement;
     commandDialog: HTMLDialogElement;
+    commandTitle?: HTMLElement;
     commandList: HTMLElement;
     commandClose: HTMLButtonElement;
     textForm: HTMLFormElement;
@@ -48,6 +51,7 @@ type MobileControllerDeps = {
   getMode: () => GameMode;
   getMuted: () => boolean;
   getCommands: () => MobileCommand[];
+  getSelectedUserLabel?: () => string | null;
   dispatchInput: (input: ModeInput) => void;
   pressDirection: (code: DirectionCode) => void;
   releaseDirection: (code: DirectionCode) => void;
@@ -81,6 +85,8 @@ export function setupMobileControls(deps: MobileControllerDeps): MobileControlle
   let renderedTextLabel = '';
   let renderedTextMode: GameMode | null = null;
   let renderedSnapshot = '';
+  let commandReturnFocus: HTMLElement = deps.dom.commands;
+  let commandOpenedFromSelectedUser = false;
   const activeDirections = new Map<number, DirectionCode>();
 
   const directionButtons: Array<[HTMLButtonElement, DirectionCode]> = [
@@ -106,10 +112,11 @@ export function setupMobileControls(deps: MobileControllerDeps): MobileControlle
 
   function closeCommandDialog(): void {
     if (deps.dom.commandDialog.open) deps.dom.commandDialog.close();
+    if (deps.dom.commandTitle) deps.dom.commandTitle.textContent = 'Commands';
+    commandOpenedFromSelectedUser = false;
   }
 
-  function openCommandDialog(): void {
-    const commands = deps.getCommands();
+  function openCommandDialog(commands = deps.getCommands(), title = 'Commands', returnFocus?: HTMLElement): void {
     if (commands.length === 0) return;
     deps.dom.commandList.replaceChildren();
     const sections = new Map<string, MobileCommand[]>();
@@ -119,9 +126,11 @@ export function setupMobileControls(deps: MobileControllerDeps): MobileControlle
       sections.set(command.section, sectionCommands);
     }
     for (const [section, sectionCommands] of sections) {
-      const heading = document.createElement('h3');
-      heading.textContent = section;
-      deps.dom.commandList.appendChild(heading);
+      if (section !== title) {
+        const heading = document.createElement('h3');
+        heading.textContent = section;
+        deps.dom.commandList.appendChild(heading);
+      }
       for (const command of sectionCommands) {
         const button = document.createElement('button');
         button.type = 'button';
@@ -136,8 +145,11 @@ export function setupMobileControls(deps: MobileControllerDeps): MobileControlle
         deps.dom.commandList.appendChild(button);
       }
     }
+    if (deps.dom.commandTitle) deps.dom.commandTitle.textContent = title;
     deps.dom.commandDialog.showModal();
     deps.dom.commandList.querySelector<HTMLButtonElement>('button')?.focus();
+    commandReturnFocus = returnFocus ?? deps.dom.commands;
+    commandOpenedFromSelectedUser = returnFocus === deps.dom.selectedUserRow;
   }
 
   function syncTextEntry(config: MobileTextEntry | null): boolean {
@@ -177,6 +189,7 @@ export function setupMobileControls(deps: MobileControllerDeps): MobileControlle
     const mode = deps.getMode();
     const muted = deps.getMuted();
     const textEntry = deps.getTextEntry();
+    const selectedUserLabel = deps.getSelectedUserLabel?.() ?? null;
     const snapshot = JSON.stringify({
       running,
       enabled,
@@ -185,6 +198,7 @@ export function setupMobileControls(deps: MobileControllerDeps): MobileControlle
       muted,
       textValue: textEntry?.value ?? null,
       textLabel: textEntry?.label ?? null,
+      selectedUserLabel,
     });
     if (snapshot === renderedSnapshot) return;
     renderedSnapshot = snapshot;
@@ -195,11 +209,27 @@ export function setupMobileControls(deps: MobileControllerDeps): MobileControlle
     deps.dom.toggle.setAttribute('aria-expanded', String(expanded));
     deps.dom.toggle.textContent = expanded ? 'Hide controls' : 'Show controls';
 
-    if (!running || !enabled) {
+    const hasSelectedUser = running && mode === 'listUsers' && Boolean(selectedUserLabel) && Boolean(deps.dom.selectedUserRow);
+    if (deps.dom.selectedUserRow) {
+      deps.dom.selectedUserRow.hidden = !hasSelectedUser;
+      if (hasSelectedUser) {
+        deps.dom.selectedUserRow.textContent = selectedUserLabel;
+        deps.dom.selectedUserRow.setAttribute('aria-label', `${selectedUserLabel} actions`);
+      }
+    }
+
+    if (!running) {
       releaseAllDirections();
       closeCommandDialog();
       return;
     }
+    if (!enabled) {
+      releaseAllDirections();
+      if (!commandOpenedFromSelectedUser) closeCommandDialog();
+      return;
+    }
+
+    const availableCommands = deps.getCommands();
 
     const editingText = syncTextEntry(textEntry);
     const inNormalMode = mode === 'normal';
@@ -215,7 +245,8 @@ export function setupMobileControls(deps: MobileControllerDeps): MobileControlle
     deps.dom.use.disabled = editingText;
     deps.dom.back.disabled = inNormalMode || editingText;
     deps.dom.chat.disabled = !inNormalMode;
-    deps.dom.commands.disabled = deps.getCommands().length === 0 || editingText;
+    deps.dom.commands.disabled = availableCommands.length === 0 || editingText;
+    deps.dom.commands.textContent = mode === 'listUsers' ? 'Actions' : 'Commands';
     deps.dom.mute.textContent = muted ? 'Unmute' : 'Mute';
     deps.dom.mute.setAttribute('aria-pressed', String(muted));
   }
@@ -274,8 +305,21 @@ export function setupMobileControls(deps: MobileControllerDeps): MobileControlle
   });
   deps.dom.commands.addEventListener('click', () => {
     if (!deps.getRunning()) return;
-    openCommandDialog();
+    openCommandDialog(deps.getCommands(), deps.getMode() === 'listUsers' ? 'User actions' : 'Commands');
   });
+  if (deps.dom.selectedUserRow) {
+    const openUserActions = (event: Event) => {
+      if (!deps.getRunning() || deps.getMode() !== 'listUsers') return;
+      event.preventDefault();
+      openCommandDialog(deps.getCommands(), 'User actions', deps.dom.selectedUserRow);
+    };
+    deps.dom.selectedUserRow.addEventListener('click', openUserActions);
+    deps.dom.selectedUserRow.addEventListener('contextmenu', openUserActions);
+    deps.dom.selectedUserRow.addEventListener('keydown', (event) => {
+      if (!opensActionMenu(event.code || event.key, event.shiftKey)) return;
+      openUserActions(event);
+    });
+  }
   deps.dom.mute.addEventListener('click', () => {
     if (!deps.getRunning()) return;
     deps.toggleMute();
@@ -304,10 +348,10 @@ export function setupMobileControls(deps: MobileControllerDeps): MobileControlle
   });
   deps.dom.commandClose.addEventListener('click', () => {
     closeCommandDialog();
-    deps.dom.commands.focus();
+    commandReturnFocus.focus();
   });
   deps.dom.commandDialog.addEventListener('cancel', () => {
-    requestAnimationFrame(() => deps.dom.commands.focus());
+    requestAnimationFrame(() => commandReturnFocus.focus());
   });
 
   window.addEventListener('blur', releaseAllDirections);
