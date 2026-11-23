@@ -181,3 +181,21 @@ def test_clock_options_cover_each_continents_modern_standard_offsets() -> None:
             assert _standard_offset(zone_name, reference_date) == timedelta(
                 hours=expected_hours
             )
+
+
+def test_clock_menu_distinguishes_shared_standard_offsets() -> None:
+    """Offer both fixed and seasonal clocks on either side of the equator."""
+    for city, neighbor, january, july in (
+        ("America/Phoenix", "America/Denver", 0, -1),
+        ("Australia/Sydney", "Australia/Brisbane", 1, 0),
+        ("Australia/Adelaide", "Australia/Darwin", 1, 0),
+        ("America/Adak", "Pacific/Honolulu", 0, 1),
+        ("Pacific/Norfolk", "Pacific/Noumea", 1, 0),
+    ):
+        assert {city, neighbor} <= set(TIME_ZONE_OPTIONS)
+        for month, expected in ((1, january), (7, july)):
+            instant = datetime(2026, month, 15, tzinfo=timezone.utc)
+            actual = instant.astimezone(ZoneInfo(city)).utcoffset()
+            other = instant.astimezone(ZoneInfo(neighbor)).utcoffset()
+            assert actual is not None and other is not None
+            assert actual - other == timedelta(hours=expected)
