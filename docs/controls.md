@@ -205,6 +205,13 @@ Applies to effect select, user/item list modes, item selection, item property li
 - `Escape`: Exit help viewer
 - No first-letter navigation in this mode
 
+### Platforms (World Builder)
+
+- Choose **Platforms** to browse every elevation or **Add platform** to enter a new flat rectangle. Creating a platform opens an unsaved draft at your position. Set its Name, Start X/Y, End X/Y and Elevation, then choose **Create platform**. This permits coordinate entry for disconnected islands and new elevations.
+- Use the shared property controls. `Up`/`Down` browse rows, `Left`/`Right` adjust coordinates by one, and page keys adjust by ten. `Enter` opens text entry, where `Up`/`Down` step the value. `Space` reads the selected property's tooltip and range. Signed integer coordinates range from -1,000,000 to 1,000,000.
+- Existing platform edits are validated and saved by the server. Only the accepted property value is announced. Reversed corners are normalized. Platforms may touch, and platforms at different elevations may share X/Y coordinates. Same-height overlaps are rejected. Disconnected platforms are allowed.
+- **Delete platform** uses the shared confirmation controls. Edits and deletion retain any cells required by users, spawn, placed items and landings. A rejected edit announces the server's reason. `Escape` returns to the previous menu or cancels text entry.
+
 ### Ambiance editor (World Builder)
 
 - `Add ambiance` / `Edit ambiances`: Create at your current square or select a region on this floor. Both open the same editor, with Type first.

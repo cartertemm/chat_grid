@@ -30,7 +30,7 @@ describe('named region builder', () => {
     expect(updateStatus).toHaveBeenLastCalledWith('Start X: 1');
     controller.handleRegionActions('Space', ' ');
     expect(updateStatus).toHaveBeenLastCalledWith(
-      'Move the west edge by one square with Left or Right. Type: number. Editable.',
+      'Move the west edge by one square with Left or Right. Type: number. Range: -1000000 to 1000000 step 1. Editable.',
     );
     controller.handleRegionActions('KeyD', 'd');
     controller.handleRegionActions('Space', ' ');

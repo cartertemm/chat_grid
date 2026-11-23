@@ -1,5 +1,13 @@
 # Runtime Flow
 
+## Walkable platforms
+
+Platforms are flat rectangles in shared world coordinates. Both corners are inclusive. A new default world starts with two 41-by-41 platforms at elevations 0 and 40. The configured grid size sets the dimensions used when seeding an older world. Builders can add connected rooms, narrow bridges, or detached islands at signed coordinates. Rectangles at one elevation may share an edge, and rectangles at different elevations may cover the same horizontal space.
+
+Movement prediction and server validation check the destination cell. A diagonal step also requires both neighboring orthogonal cells. Wall and door checks apply across a platform seam. A platform introduces no acoustic boundary on its own. List travel to another platform at the same elevation sends a single landing request, so crossing a gap never creates an intermediate standing position. Teleporters can connect different elevations. Existing elevators retain their two configured stops.
+
+Location announcements use the name of the platform under the reported position. The canvas follows the local player on larger maps. A platform checkpoint restores its geometry together with the objects that depend on it.
+
 ## Connect Flow
 
 1. User clicks connect.
@@ -20,7 +28,7 @@
    - `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` are required server environment values.
    - Server startup fails with a clear configuration error when any of these values is absent.
 10. Client:
-   - applies `welcome.worldConfig.gridSize` for authoritative grid bounds/rendering
+   - applies `welcome.platforms` for walkability and map rendering
    - applies `welcome.worldConfig.floors` for floor names and elevations
    - applies `welcome.worldConfig.movementTickMs` as movement pacing guidance
    - applies `welcome.worldConfig.movementMaxStepsPerTick` for movement-rate parity
@@ -169,9 +177,9 @@ The server releases the user's item runtime state, saves their position and last
 
 Named places are server-owned inclusive rectangles stored in `regions.json` beside the other world datasets. They share the ordinary debounced save lifecycle and atomic state-file writer. World Builder mutations require `world.structure.edit`, validate floor and bounds, then broadcast canonical upserts/removals. Regions can overlap and are independent of ambiance sound rectangles. Welcome replaces the client's named-place snapshot. The coordinate command includes all containing regions on the current floor, ordered by inclusive tile area, name, then stable ID.
 
-The server keeps world state in JSON files in the configured state directory: `items.json` (the configured state file), plus `structures.json`, `ambiances.json`, and `piano_songs.json` beside it. Each save rewrites a whole file through a synced temporary file and a rename, so a crash mid-save leaves either the previous file or the complete new one. Saved files are readable and writable only by the server's account.
+The server keeps world state in JSON files in the configured state directory: `items.json` (the configured state file), plus `platforms.json`, `structures.json`, `regions.json`, `ambiances.json`, and `piano_songs.json` beside it. Each save rewrites a whole file through a synced temporary file and a rename, so a crash mid-save leaves either the previous file or the complete new one. Saved files are readable and writable only by the server's account.
 
-If one of these files can't be loaded at startup, including when one entry in it is invalid, the server renames it to `<name>.unreadable-<UTC time>` (for example `items.json.unreadable-20261119T012014123456Z`), logs an error naming the new path, and starts without that state. Later saves create a fresh file, so the unreadable copy stays available for recovery. If the state file is a symlink, the copy lands beside the link's target under the target's name, and the link is kept. To restore it, stop the server, repair the copy, and rename it back. If the file can't be set aside, for example because the state directory can't be accessed or the configured path isn't a regular file, the server logs an error and doesn't save that state until it restarts, so the original is never replaced. Only a missing file counts as a first run.
+If saved platform geometry is corrupt, startup stops so the remaining files can be recovered against their authored map. If one of the other files can't be loaded at startup, including when one entry in it is invalid, the server renames it to `<name>.unreadable-<UTC time>` (for example `items.json.unreadable-20261119T012014123456Z`), logs an error naming the new path, and starts without that state. Later saves create a fresh file, so the unreadable copy stays available for recovery. If the state file is a symlink, the copy lands beside the link's target under the target's name, and the link is kept. To restore it, stop the server, repair the copy, and rename it back. If the file can't be set aside, for example because the state directory can't be accessed or the configured path isn't a regular file, the server logs an error and doesn't save that state until it restarts, so the original is never replaced. Only a missing file counts as a first run.
 
 ## Runtime Components
 

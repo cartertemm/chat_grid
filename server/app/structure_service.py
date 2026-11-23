@@ -11,6 +11,7 @@ import uuid
 
 from .client import ClientConnection
 from .models import WallStructure, WallDoor
+from .platform_service import PlatformService
 from .state_files import read_state_text, set_aside_unreadable, write_json_atomic
 
 LOGGER = logging.getLogger("chgrid.server.structures")
@@ -29,11 +30,13 @@ class StructureService:
         state_file: Path | None,
         grid_size: int,
         presets: Mapping[str, Mapping[str, object]],
+        geometry: PlatformService | None = None,
     ) -> None:
         """Load structures and normalize editable server preset definitions."""
 
         self.state_file = state_file
         self.grid_size = max(1, int(grid_size))
+        self.geometry = geometry
         self.presets = {str(key): dict(value) for key, value in presets.items()}
         self.structures: dict[str, WallStructure] = {}
         self._edges: dict[tuple[int, str, int, int], str] = {}
@@ -328,7 +331,10 @@ class StructureService:
         if not isinstance(raw, list):
             raise StructureError("Structure state must be a list.")
         staged = StructureService(
-            state_file=None, grid_size=self.grid_size, presets=self.presets
+            state_file=None,
+            grid_size=self.grid_size,
+            presets=self.presets,
+            geometry=self.geometry,
         )
         for entry in raw:
             wall = WallStructure.model_validate(entry)
@@ -413,6 +419,16 @@ class StructureService:
                 and 0 <= wall.startY < self.grid_size
                 and wall.startY + wall.length <= self.grid_size
             )
+        if self.geometry is not None:
+            in_bounds = all(
+                self.geometry.contains(x, y, z)
+                or self.geometry.contains(
+                    x - (orientation == "vertical"),
+                    y - (orientation == "horizontal"),
+                    z,
+                )
+                for z, orientation, x, y in self.wall_edges(wall)
+            )
         if not in_bounds:
             raise StructureError("Wall would extend outside the world.")
         offsets: set[int] = set()
@@ -434,7 +450,21 @@ class StructureService:
             if door.isLocked and (not door.hasPin or door.unlockMode != "keypad"):
                 raise StructureError("A door needs a keypad PIN before it can lock.")
             line = wall.startY if wall.orientation == "horizontal" else wall.startX
-            if line <= 0 or line >= self.grid_size:
+            if self.geometry is not None:
+                x = wall.startX + (
+                    door.offset if wall.orientation == "horizontal" else 0
+                )
+                y = wall.startY + (door.offset if wall.orientation == "vertical" else 0)
+                supported = self.geometry.contains(
+                    x, y, wall.floorZ
+                ) and self.geometry.contains(
+                    x - (wall.orientation == "vertical"),
+                    y - (wall.orientation == "horizontal"),
+                    wall.floorZ,
+                )
+            else:
+                supported = 0 < line < self.grid_size
+            if not supported:
                 raise StructureError("A door needs walkable tiles on both sides.")
         for edge in self.wall_edges(wall):
             existing = self._edges.get(edge)

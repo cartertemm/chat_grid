@@ -21,11 +21,14 @@ from .item_catalog import (
     is_known_item_type,
 )
 from .item_service import ItemService
+from .item_geometry import END_COORDINATES, item_bounds, move_item, validate_item_bounds
+from .platform_service import PlatformService
 from .item_type_handlers import get_item_type_handler
 from .items.types.clock.runtime import ClockRuntime
 from .items.types.elevator.runtime import ElevatorRuntime, ElevatorRuntimeCallbacks
 from .items.types.piano.runtime import PianoRuntime
 from .items.types.radio_station.runtime import RadioRuntime
+from .items.types.teleporter.validator import parse_destination
 from .teleport_runtime import (
     TeleportDestination,
     TeleportRuntime,
@@ -70,6 +73,7 @@ class ItemRuntimeHost(Protocol):
     item_service: ItemService
     max_carried_items: int
     max_items_per_user: int
+    platform_service: PlatformService
 
     def _client_has_permission(self, client: ClientConnection, key: str) -> bool: ...
 
@@ -79,10 +83,9 @@ class ItemRuntimeHost(Protocol):
 
     def _is_in_bounds(self, x: int, y: int) -> bool: ...
 
-    @staticmethod
-    def _is_supported_floor(z: int) -> bool: ...
+    def _is_supported_floor(self, z: int) -> bool: ...
 
-    def _floor_name(self, z: int) -> str: ...
+    def _floor_name(self, x: int, y: int, z: int) -> str: ...
 
     def _persist_client_position(
         self, client: ClientConnection, *, force: bool = False
@@ -100,6 +103,9 @@ class ItemRuntime:
         self.running = False
         self.host = host
         self.delivery = host.delivery
+        host.item_service.drop_placement = lambda item: self._disconnect_drop_position(
+            item, self.get_client_by_id(item.carrierId or "")
+        )
         self.item_last_use_ms: dict[str, int] = {}
         self.piano = PianoRuntime(self)
         self.radio = RadioRuntime(self)
@@ -109,6 +115,9 @@ class ItemRuntime:
                 delivery=self.delivery,
                 is_in_bounds=self.host._is_in_bounds,
                 is_supported_floor=self.host._is_supported_floor,
+                is_valid_destination=lambda x, y, z: (
+                    self.host.platform_service.contains(x, y, z)
+                ),
                 persist_client_position=lambda client: (
                     self.host._persist_client_position(client, force=True)
                 ),
@@ -191,9 +200,38 @@ class ItemRuntime:
     async def finish_client_disconnect(self, client: ClientConnection) -> None:
         """Drop carried items after final client position persistence."""
 
-        for item in self.item_service.drop_carried_items_for_disconnect(client):
+        for item in self.item_service.drop_carried_items_for_disconnect(
+            client, lambda item: self._disconnect_drop_position(item, client)
+        ):
             await self.broadcast_item(item)
         self.request_state_save()
+
+    def _disconnect_drop_position(
+        self, item: WorldItem, client: ClientConnection | None
+    ) -> tuple[int, int, int]:
+        """Prefer the last cell, then the resting anchor, then a fitting platform."""
+
+        previous = self.item_service.resting_positions.get(item.id)
+        current = (client.x, client.y, client.z) if client else (item.x, item.y, item.z)
+        for position in (current, previous):
+            if position is None:
+                continue
+            candidate = item.model_copy(deep=True)
+            move_item(candidate, *position)
+            if self._item_footprint_in_bounds(candidate):
+                return position
+        bounds = item_bounds(item)
+        width, depth = bounds[3] - item.x + 1, bounds[4] - item.y + 1
+        for z in sorted(self.host.platform_service.elevations):
+            position_xy = self.host.platform_service.find_placement(
+                width, depth, z, current[:2]
+            )
+            if position_xy is not None:
+                candidate = item.model_copy(deep=True)
+                move_item(candidate, *position_xy, z)
+                if self._item_footprint_in_bounds(candidate):
+                    return (*position_xy, z)
+        raise ValueError("No supported placement remains for the carried item.")
 
     async def sync_carried_items(self, client: ClientConnection) -> None:
         """Move and broadcast every item carried by a moving client."""
@@ -203,9 +241,7 @@ class ItemRuntime:
             return
         actor_id, actor_name = self._item_updated_actor(client)
         for carried in carried_items:
-            carried.x = client.x
-            carried.y = client.y
-            carried.z = client.z
+            move_item(carried, client.x, client.y, client.z)
             carried.updatedAt = self.item_service.now_ms()
             carried.updatedBy = actor_id
             carried.updatedByName = actor_name
@@ -243,10 +279,10 @@ class ItemRuntime:
 
         return await self.teleport.begin(client, destination)
 
-    def floor_name(self, z: int) -> str:
+    def floor_name(self, x: int, y: int, z: int) -> str:
         """Return the configured label for a floor elevation."""
 
-        return self.host._floor_name(z)
+        return self.host._floor_name(x, y, z)
 
     def get_client_by_id(self, client_id: str) -> ClientConnection | None:
         """Resolve one connected client by runtime id."""
@@ -328,6 +364,10 @@ class ItemRuntime:
             )
             return
         item = self.item_service.default_item(client, packet.itemType)
+        if item.type == "teleporter" and self.teleport_destination_error(
+            parse_destination(item.params.get("destination"))
+        ):
+            item.params["destination"] = f"{client.x}, {client.y}, {client.z}"
         if item.type == "elevator":
             item.z = 0
             item.params["currentZ"] = client.z
@@ -356,7 +396,7 @@ class ItemRuntime:
         await self.delivery.broadcast(
             BroadcastChatMessagePacket(
                 type="chat_message",
-                message=f"{client.nickname} placed {item_text} at {item.x}, {item.y}, {item.z}, {self.floor_name(item.z)}.",
+                message=f"{client.nickname} placed {item_text} at {item.x}, {item.y}, {item.z}, {self.floor_name(item.x, item.y, item.z)}.",
                 system=True,
             ),
             exclude=client,
@@ -365,7 +405,7 @@ class ItemRuntime:
             client,
             True,
             "add",
-            f"You placed {item_text} at {item.x}, {item.y}, {item.z}, {self.floor_name(item.z)}.",
+            f"You placed {item_text} at {item.x}, {item.y}, {item.z}, {self.floor_name(item.x, item.y, item.z)}.",
             item.id,
         )
         return
@@ -404,6 +444,12 @@ class ItemRuntime:
         item = self.item_service.default_item(client, source.type)
         item.title = source.title
         item.params = deepcopy(source.params)
+        for field, start, new in zip(
+            END_COORDINATES, (source.x, source.y, source.z), (item.x, item.y, item.z)
+        ):
+            endpoint = getattr(source, field)
+            if endpoint is not None:
+                setattr(item, field, endpoint + new - start)
         if item.type == "radio_station":
             item.params.update(stationName="", nowPlaying="")
         if item.type == "elevator":
@@ -420,6 +466,12 @@ class ItemRuntime:
             item.params = get_item_type_handler(item.type).validate_update(
                 item, deepcopy(item.params)
             )
+            if item.type == "teleporter":
+                error = self.teleport_destination_error(
+                    parse_destination(item.params.get("destination"))
+                )
+                if error:
+                    raise ValueError(error)
         except ValueError as exc:
             await self.send_result(client, False, "duplicate", str(exc))
             return
@@ -525,9 +577,7 @@ class ItemRuntime:
             )
             return
         pickup_item.carrierId = client.id
-        pickup_item.x = client.x
-        pickup_item.y = client.y
-        pickup_item.z = client.z
+        move_item(pickup_item, client.x, client.y, client.z)
         pickup_item.updatedAt = self.item_service.now_ms()
         actor_id, actor_name = self._item_updated_actor(client)
         pickup_item.updatedBy = actor_id
@@ -592,10 +642,24 @@ class ItemRuntime:
                 drop_item.id,
             )
             return
+        placed = drop_item.model_copy(deep=True)
+        move_item(placed, packet.x, packet.y, packet.z)
+        if not self._item_footprint_in_bounds(placed):
+            await self.send_result(
+                client,
+                False,
+                "drop",
+                "The item footprint does not fit at this position.",
+                drop_item.id,
+            )
+            return
         drop_item.carrierId = None
-        drop_item.x = packet.x
-        drop_item.y = packet.y
-        drop_item.z = packet.z
+        move_item(drop_item, packet.x, packet.y, packet.z)
+        self.item_service.resting_positions[drop_item.id] = (
+            drop_item.x,
+            drop_item.y,
+            drop_item.z,
+        )
         drop_item.updatedAt = self.item_service.now_ms()
         actor_id, actor_name = self._item_updated_actor(client)
         drop_item.updatedBy = actor_id
@@ -606,7 +670,7 @@ class ItemRuntime:
         await self.delivery.broadcast(
             BroadcastChatMessagePacket(
                 type="chat_message",
-                message=f"{client.nickname} dropped {item_text} at {drop_item.x}, {drop_item.y}, {drop_item.z}, {self.floor_name(drop_item.z)}.",
+                message=f"{client.nickname} dropped {item_text} at {drop_item.x}, {drop_item.y}, {drop_item.z}, {self.floor_name(drop_item.x, drop_item.y, drop_item.z)}.",
                 system=True,
             ),
             exclude=client,
@@ -615,7 +679,7 @@ class ItemRuntime:
             client,
             True,
             "drop",
-            f"Dropped {drop_item.title} at {drop_item.x}, {drop_item.y}, {drop_item.z}, {self.floor_name(drop_item.z)}.",
+            f"Dropped {drop_item.title} at {drop_item.x}, {drop_item.y}, {drop_item.z}, {self.floor_name(drop_item.x, drop_item.y, drop_item.z)}.",
             drop_item.id,
         )
         return
@@ -977,9 +1041,7 @@ class ItemRuntime:
 
         target_username = target.username or target.nickname or target_user_id
         hand_item.carrierId = target.id
-        hand_item.x = target.x
-        hand_item.y = target.y
-        hand_item.z = target.z
+        move_item(hand_item, target.x, target.y, target.z)
         hand_item.updatedAt = self.item_service.now_ms()
         actor_id, actor_name = self._item_updated_actor(client)
         hand_item.updatedBy = actor_id
@@ -1375,6 +1437,8 @@ class ItemRuntime:
                 update_item.id,
             )
             return
+        current_item = update_item
+        update_item = current_item.model_copy(deep=True)
         if packet.title is not None:
             title = packet.title.strip()
             if not title:
@@ -1388,16 +1452,51 @@ class ItemRuntime:
                 return
             update_item.title = title[:80]
         if packet.params:
-            next_params = {**update_item.params, **packet.params}
+            incoming_params = dict(packet.params)
+            try:
+                for field in END_COORDINATES:
+                    if field in incoming_params:
+                        if update_item.type != "widget":
+                            raise ValueError(
+                                "Only widgets support editable dimensions."
+                            )
+                        endpoint = incoming_params.pop(field)
+                        if type(endpoint) is not int:
+                            raise ValueError(
+                                "Ending coordinates must be whole numbers."
+                            )
+                        setattr(update_item, field, endpoint)
+                validate_item_bounds(update_item)
+                if not self._item_footprint_in_bounds(update_item):
+                    raise ValueError(
+                        "The item footprint does not fit on the platforms."
+                    )
+            except ValueError as exc:
+                await self.send_result(
+                    client, False, "update", str(exc), update_item.id
+                )
+                return
+            next_params = {**update_item.params, **incoming_params}
             handler = get_item_type_handler(update_item.type)
             try:
                 next_params = handler.validate_update(update_item, next_params)
+                if update_item.type == "teleporter":
+                    error = self.teleport_destination_error(
+                        parse_destination(next_params.get("destination"))
+                    )
+                    if error:
+                        raise ValueError(error)
             except ValueError as exc:
                 await self.send_result(
                     client, False, "update", str(exc), update_item.id
                 )
                 return
             update_item.params = next_params
+        current_item.title = update_item.title
+        current_item.params = update_item.params
+        for field in END_COORDINATES:
+            setattr(current_item, field, getattr(update_item, field))
+        update_item = current_item
         update_item.updatedAt = self.item_service.now_ms()
         actor_id, actor_name = self._item_updated_actor(client)
         update_item.updatedBy = actor_id
@@ -1462,6 +1561,9 @@ class ItemRuntime:
             "x": str(item.x),
             "y": str(item.y),
             "z": str(item.z),
+            "endX": str(item.endX if item.endX is not None else item.x),
+            "endY": str(item.endY if item.endY is not None else item.y),
+            "endZ": str(item.endZ if item.endZ is not None else item.z),
             "carrierId": carrier_label,
             "version": str(item.version),
             "createdBy": item.createdByName or item.createdBy,
@@ -1598,11 +1700,21 @@ class ItemRuntime:
     def _item_footprint_in_bounds(self, item: WorldItem) -> bool:
         """Return whether every occupied cell is inside the horizontal grid."""
 
-        return all(
-            self.host._is_in_bounds(
-                item.x + int(offset.get("x", 0)),
-                item.y + int(offset.get("y", 0)),
+        try:
+            validate_item_bounds(item)
+        except ValueError:
+            return False
+        bounds = item_bounds(item)
+        if any(getattr(item, field) is not None for field in END_COORDINATES):
+            return self.host.platform_service.covers_rectangle(
+                item.x, item.y, bounds[3], bounds[4], item.z
             )
+        floors = item.params.get("floorZs", [item.z])
+        return all(
+            self.host.platform_service.contains(
+                item.x + int(offset.get("x", 0)), item.y + int(offset.get("y", 0)), z
+            )
+            for z in floors
             for offset in item.occupiedOffsets
         )
 

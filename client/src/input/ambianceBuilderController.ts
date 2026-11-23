@@ -1,5 +1,6 @@
 import { handleMenuRowKey } from './listController';
 import { getEditSessionAction } from './editSession';
+import { coordinateMetadata } from './coordinateControls';
 import { formatSteppedNumber } from './numeric';
 import {
   adjustPropertyValue,
@@ -63,10 +64,10 @@ const FADE_DISTANCE_METADATA: PropertyControlMetadata = {
 };
 
 const EDGE_METADATA: Record<AmbianceEdgeAction, PropertyControlMetadata> = {
-  startX: { valueType: 'number', tooltip: 'Move the west edge by one square with Left or Right.' },
-  startY: { valueType: 'number', tooltip: 'Move the south edge by one square with Left or Right.' },
-  endX: { valueType: 'number', tooltip: 'Move the east edge by one square with Left or Right.' },
-  endY: { valueType: 'number', tooltip: 'Move the north edge by one square with Left or Right.' },
+  startX: coordinateMetadata('Move the west edge by one square with Left or Right.'),
+  startY: coordinateMetadata('Move the south edge by one square with Left or Right.'),
+  endX: coordinateMetadata('Move the east edge by one square with Left or Right.'),
+  endY: coordinateMetadata('Move the north edge by one square with Left or Right.'),
 };
 
 const SLIDE_METADATA: Record<AmbianceSlideAction, PropertyControlMetadata> = {

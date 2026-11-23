@@ -1,6 +1,7 @@
 """Authoritative elevator lifecycle, timing, movement, and sound runtime."""
 
 from __future__ import annotations
+from ....item_geometry import move_item
 
 import asyncio
 import logging
@@ -48,7 +49,7 @@ class ElevatorRuntimeCallbacks:
     persist_client_position: Callable[[ClientConnection], None]
     find_carried_items: Callable[[str], list[WorldItem]]
     now_ms: Callable[[], int]
-    floor_name: Callable[[int], str]
+    floor_name: Callable[[int, int, int], str]
     get_emit_range: Callable[[WorldItem], int]
 
 
@@ -123,7 +124,7 @@ class ElevatorRuntime:
             )
             await self._send_result(
                 client,
-                f"You exit {item.title} on {self.callbacks.floor_name(current_z)}.",
+                f"You exit {item.title} on {self.callbacks.floor_name(item.x, item.y, current_z)}.",
                 item.id,
             )
             return
@@ -341,15 +342,13 @@ class ElevatorRuntime:
                     z=destination_z,
                     message=(
                         f"{item.title} arrives on "
-                        f"{self.callbacks.floor_name(destination_z)}. The door opens."
+                        f"{self.callbacks.floor_name(item.x, item.y, destination_z)}. The door opens."
                     ),
                 ),
             )
             carried_items = self.callbacks.find_carried_items(rider.id)
             for carried in carried_items:
-                carried.x = rider.x
-                carried.y = rider.y
-                carried.z = rider.z
+                move_item(carried, rider.x, rider.y, rider.z)
                 carried.updatedAt = self.callbacks.now_ms()
                 carried.updatedBy = rider.user_id or rider.id
                 carried.updatedByName = rider.username or rider.nickname
@@ -383,9 +382,7 @@ class ElevatorRuntime:
             rider.z = travel_z
             carried_items = self.callbacks.find_carried_items(rider.id)
             for carried in carried_items:
-                carried.x = rider.x
-                carried.y = rider.y
-                carried.z = rider.z
+                move_item(carried, rider.x, rider.y, rider.z)
                 await self.callbacks.broadcast_item(carried)
             await self.delivery.broadcast(client_position_packet(rider))
             await self.delivery.send(
@@ -435,7 +432,7 @@ class ElevatorRuntime:
         for rider in riders:
             rider.x, rider.y, rider.z = item.x, item.y, landing_z
             for carried in self.callbacks.find_carried_items(rider.id):
-                carried.x, carried.y, carried.z = rider.x, rider.y, rider.z
+                move_item(carried, rider.x, rider.y, rider.z)
                 carried_items.append(carried)
         await self.callbacks.broadcast_item(item)
         # Items and riders can leave during these awaits; don't resurrect them.

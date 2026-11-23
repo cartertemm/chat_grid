@@ -165,7 +165,7 @@ export function createItemPropertyEditor(deps: EditorDeps): {
             ? deps.getItemPropertyValue(item, selectedKey).toLowerCase() === 'on'
               ? 'on'
               : 'off'
-            : String(item.params[selectedKey] ?? '');
+            : String(item.params[selectedKey] ?? deps.getItemPropertyValue(item, selectedKey));
       deps.state.cursorPos = deps.state.nicknameInput.length;
       deps.setReplaceTextOnNextType(true);
       deps.updateStatus(`Edit ${deps.itemPropertyLabel(selectedKey)}: ${deps.state.nicknameInput}`);

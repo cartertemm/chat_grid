@@ -1,7 +1,10 @@
 import { type IncomingMessage } from './protocol';
+import { legacyPlatforms, type Platform } from '../state/platformGeometry';
 import { getFacingDirection, type NamedRegion, type AmbianceRegion, type AmbianceType, type StructurePreset, type WallStructure, type WorldItem } from '../state/gameState';
 import { WORLD_FOOTSTEP_GAIN, type WorldSoundSource } from '../audio/worldAudio';
 import { announcePropertyValue } from '../input/propertyControls';
+import { resolveWorldItemSourcePosition } from '../audio/worldItemPosition';
+import { worldItemAcousticZoneId } from '../audio/acousticZones';
 
 /**
  * Dependency contract for creating a message handler without hard-coupling to `main.ts`.
@@ -9,7 +12,6 @@ import { announcePropertyValue } from '../input/propertyControls';
 type MessageHandlerDeps = {
   getWorldGridSize: () => number;
   setWorldGridSize: (size: number) => void;
-  setWorldFloors: (floors: Array<{ id: string; name: string; z: number }>) => void;
   setStructurePresets: (presets: StructurePreset[]) => void;
   setAmbianceTypes: (types: AmbianceType[]) => void;
   refreshStructureGeometry: () => void;
@@ -24,6 +26,7 @@ type MessageHandlerDeps = {
     peers: Map<string, { id: string; userId?: string | null; nickname: string; x: number; y: number; z: number; facingDeg: number; acousticZoneId: string }>;
     items: Map<string, WorldItem>;
     structures: Map<string, WallStructure>;
+    platforms: Map<string, Platform>;
     ambiances: Map<string, AmbianceRegion>;
     regions: Map<string, NamedRegion>;
     mode: string;
@@ -88,6 +91,7 @@ type MessageHandlerDeps = {
   handleDoorResult?: (message: Extract<IncomingMessage, {type: 'door_action_result'}>) => void;
   handleStructureActionResult: (message: Extract<IncomingMessage, { type: 'structure_action_result' }>) => void;
   handleRegionActionResult?: (message: Extract<IncomingMessage, { type: 'region_action_result' }>) => void;
+  handlePlatformActionResult?: (message: Extract<IncomingMessage, { type: 'platform_action_result' }>) => void;
   handleAmbianceActionResult: (message: Extract<IncomingMessage, { type: 'ambiance_action_result' }>) => void;
   handleTeleportTransition: (message: Extract<IncomingMessage, { type: 'teleport_transition' }>) => void;
   connectToLiveKit: (url: string, token: string) => void;
@@ -129,6 +133,7 @@ export function createOnMessageHandler(deps: MessageHandlerDeps): (message: Inco
         break;
       case 'world_restored':
         deps.handleWorldRestored?.();
+        if (message.platforms) deps.state.platforms = new Map(message.platforms.map((p) => [p.id, p]));
         deps.state.items = new Map(message.items.map((item) => [item.id, item]));
         deps.state.structures = new Map(message.structures.map((wall) => [wall.id, wall]));
         deps.state.ambiances = new Map(message.ambiances.map((ambiance) => [ambiance.id, ambiance]));
@@ -159,6 +164,15 @@ export function createOnMessageHandler(deps: MessageHandlerDeps): (message: Inco
       case 'region_action_result':
         deps.handleRegionActionResult?.(message);
         break;
+      case 'platform_action_result':
+        deps.handlePlatformActionResult?.(message);
+        break;
+      case 'platform_upsert':
+        deps.state.platforms.set(message.platform.id, message.platform);
+        break;
+      case 'platform_remove':
+        deps.state.platforms.delete(message.platformId);
+        break;
       case 'region_upsert':
         deps.state.regions.set(message.region.id, message.region);
         break;
@@ -185,9 +199,8 @@ export function createOnMessageHandler(deps: MessageHandlerDeps): (message: Inco
         if (message.worldConfig?.movementTickMs && Number.isInteger(message.worldConfig.movementTickMs) && message.worldConfig.movementTickMs > 0) {
           deps.setMovementTickMs(message.worldConfig.movementTickMs);
         }
-        if (message.worldConfig?.floors) {
-          deps.setWorldFloors(message.worldConfig.floors);
-        }
+        const platforms = message.platforms ?? legacyPlatforms(deps.getWorldGridSize(), message.worldConfig?.floors);
+        deps.state.platforms = new Map(platforms.map((p) => [p.id, p]));
         deps.setStructurePresets(message.worldConfig?.structurePresets ?? []);
         deps.setAmbianceTypes(message.worldConfig?.ambianceTypes ?? []);
         deps.rendererSetGridSize(deps.getWorldGridSize());
@@ -199,8 +212,8 @@ export function createOnMessageHandler(deps: MessageHandlerDeps): (message: Inco
         deps.state.player.id = message.id;
         deps.state.running = true;
         deps.setConnecting(false);
-        deps.state.player.x = Math.max(0, Math.min(deps.getWorldGridSize() - 1, message.player.x));
-        deps.state.player.y = Math.max(0, Math.min(deps.getWorldGridSize() - 1, message.player.y));
+        deps.state.player.x = message.player.x;
+        deps.state.player.y = message.player.y;
         deps.state.player.z = message.player.z;
         deps.state.player.facingDeg = message.player.facingDeg;
         deps.state.player.acousticZoneId = message.player.acousticZoneId;
@@ -454,7 +467,15 @@ export function createOnMessageHandler(deps: MessageHandlerDeps): (message: Inco
       case 'item_use_sound': {
         const soundUrl = deps.resolveIncomingSoundUrl(message.sound);
         if (!soundUrl) break;
-        deps.playWorldSound(soundUrl, message);
+        const item = deps.state.items.get(message.itemId);
+        const listener = deps.state.player;
+        const position = item && !item.carrierId
+          ? resolveWorldItemSourcePosition(item, listener.z, listener.x, listener.y)
+          : message;
+        const acousticZoneId = item && !item.carrierId
+          ? worldItemAcousticZoneId(item, listener.acousticZoneId, deps.state.items)
+          : message.acousticZoneId;
+        deps.playWorldSound(soundUrl, { ...message, ...position, acousticZoneId });
         break;
       }
 

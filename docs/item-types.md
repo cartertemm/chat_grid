@@ -1,5 +1,11 @@
 # Item Types
 
+## Widget dimensions
+
+Widgets expose End X, End Y and End Z in the usual item property editor. Use arrows for one-cell adjustments, Enter for typed coordinates, and Space for help. Coordinates are inclusive and must be at or beyond the item's starting coordinate. Each dimension can span up to 1000 cells, and coordinates are limited to -1000000 through 1000000. A widget's whole base must have platform coverage. Its height can reach through air and intersect another platform. Use the widget from any occupied cell. Dimensions add no walking surface or movement obstruction.
+
+Pickup, carrying, handing and drop translate the widget's bounds together. Drop rejects unsupported footprints. Disconnect and restart return a carried widget to a fitting position, preferring its last resting position when the current cell cannot support it. Duplicate preserves dimensions and places the new anchor at the caller. Sound is positioned at the nearest point of a broad widget to the listener. All other current item types retain their existing fixed footprints.
+
 ## Duplicating items
 
 The item management menu offers Duplicate here to users with item creation permission for every item type on their square or held by them. The new item belongs to the caller and copies the source's current saved authoring properties. It has its own identity, initial revision, timestamps and independent saved piano recording. Carrying, active playback and elevator travel state start fresh. Editing or deleting either item leaves the other intact. The normal ownership cap, footprint validation and creation rate limit apply.
@@ -46,7 +52,7 @@ Radio retains its stream, volume, effects, range, and facing controls; it has no
 - Use from its square to teleport to any in-bounds square on a configured floor. Walls along the route do not affect teleportation.
 - The transition lasts two seconds: current location audio fades out for one second, the server switches position, then destination audio fades in for one second. The existing teleport start and arrival sounds play.
 - Facing and held items follow the user. Ordinary item use permissions apply. Movement and further item use are blocked during the transition; elevator riders must leave the elevator before using it.
-- Destination syntax is checked when editing; grid bounds and supported floor are checked again before use. Editing or deleting the device after activation does not change the captured destination.
+- The destination must be a valid platform cell when edited and when used. Editing or deleting the device after activation does not change the captured destination.
 
 ## `radio_station`
 

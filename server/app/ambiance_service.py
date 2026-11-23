@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from .client import ClientConnection
 from .models import AmbianceRegion, AmbianceType
+from .platform_service import PlatformService
 from .state_files import read_state_text, set_aside_unreadable, write_json_atomic
 
 LOGGER = logging.getLogger("chgrid.server.ambiances")
@@ -115,12 +116,14 @@ class AmbianceService:
         grid_size: int,
         sounds_dir: Path | None = None,
         floor_elevations: Iterable[int] = DEFAULT_FLOOR_ELEVATIONS,
+        geometry: PlatformService | None = None,
     ) -> None:
         """Load persisted regions and discover the startup ambiance catalog."""
 
         self.state_file = state_file
         self.grid_size = max(1, int(grid_size))
         self.floor_elevations = frozenset(int(value) for value in floor_elevations)
+        self.geometry = geometry
         self.sounds_dir = (
             Path(sounds_dir)
             if sounds_dir is not None
@@ -141,7 +144,9 @@ class AmbianceService:
     def add_ambiance(self, client: ClientConnection) -> AmbianceRegion:
         """Create a one-cell region at the caller's position and floor."""
 
-        if client.z not in self.floor_elevations:
+        if client.z not in (
+            self.geometry.elevations if self.geometry else self.floor_elevations
+        ):
             raise AmbianceError("Ambiances can only be added on a valid floor.")
         first_type = self.ambiance_types[0] if self.ambiance_types else None
         if first_type is None:
@@ -330,14 +335,17 @@ class AmbianceService:
 
         if region.startX > region.endX or region.startY > region.endY:
             raise AmbianceError("Ambiance must have a positive area.")
-        if not (
+        if self.geometry is None and not (
             0 <= region.startX < self.grid_size
             and 0 <= region.endX < self.grid_size
             and 0 <= region.startY < self.grid_size
             and 0 <= region.endY < self.grid_size
         ):
             raise AmbianceError("Ambiance would extend outside the world.")
-        if require_floor and region.floorZ not in self.floor_elevations:
+        elevations = (
+            self.geometry.elevations if self.geometry else self.floor_elevations
+        )
+        if require_floor and region.floorZ not in elevations:
             raise AmbianceError("Ambiances can only be added on a valid floor.")
         if require_known_sound and region.soundId not in self._types_by_id:
             raise AmbianceError("Unknown ambiance sound.")

@@ -133,7 +133,9 @@ This is a behavior guide for packet semantics beyond raw schemas.
 - `auth_required.expectedClientRevision`: authoritative browser asset revision required by this server instance.
 - `auth_result.authPolicy`: server auth limits echoed on auth success/failure responses.
 - `auth_result.sessionToken` is used by the client to call the instance-scoped HTTP endpoint `GET <base_path>auth/session/set` (`Authorization: Bearer <sessionToken>`, `X-Chgrid-Auth-Client: 1`) so the server can issue an instance-scoped `HttpOnly` session cookie.
-- `welcome.worldConfig.gridSize`: server-authoritative grid size used by clients for bounds/drawing.
+- `welcome.platforms` and `world_restored.platforms` carry the complete set of walkable rectangles. Records have a stable `id`, `name`, signed inclusive `startX`, `startY`, `endX`, `endY`, and one elevation `z`. The server sends `platform_upsert` and `platform_remove` for live changes.
+- Builders with `world.platform.edit` send `platform_add`, `platform_update`, or `platform_delete`. Updates and deletions identify the platform by `platformId`. The server replies with `platform_action_result` and sends accepted changes to all connected clients. An optional `requestId` is echoed on both successful and rejected results so the editor can ignore replies from an abandoned session. Repeated coordinate adjustments are applied sequentially from authoritative results and discarded when the edit fails or the selected property changes.
+- `welcome.worldConfig.gridSize` supplies the initial square dimensions for older worlds and a display scale for the canvas.
 - `welcome.worldConfig.movementTickMs`: server movement-rate window used for client movement pacing.
 - `welcome.worldConfig.movementMaxStepsPerTick`: max allowed grid steps per movement window.
 - `welcome.worldConfig.floors`: server-owned floor ids, display names, and exact `z` elevations.

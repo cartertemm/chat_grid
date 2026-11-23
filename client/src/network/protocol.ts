@@ -26,6 +26,9 @@ export const itemSchema = z.object({
   x: z.number().int(),
   y: z.number().int(),
   z: z.number().int(),
+  endX: z.number().int().optional(),
+  endY: z.number().int().optional(),
+  endZ: z.number().int().optional(),
   createdBy: z.string(),
   updatedBy: z.string(),
   createdAt: z.number().int(),
@@ -47,10 +50,10 @@ export const ambianceRegionSchema = z.object({
   name: z.string().min(1).max(100),
   soundId: z.string().min(1),
   floorZ: z.number().int(),
-  startX: z.number().int().nonnegative(),
-  startY: z.number().int().nonnegative(),
-  endX: z.number().int().nonnegative(),
-  endY: z.number().int().nonnegative(),
+  startX: z.number().int(),
+  startY: z.number().int(),
+  endX: z.number().int(),
+  endY: z.number().int(),
   volume: z.number().int().min(0).max(100),
   fadeDistance: z.number().finite().min(0).max(100),
 });
@@ -59,13 +62,18 @@ export const namedRegionSchema = z.object({
   id: z.string(),
   name: z.string().min(1).max(100),
   floorZ: z.number().int(),
-  startX: z.number().int().nonnegative(),
-  startY: z.number().int().nonnegative(),
-  endX: z.number().int().nonnegative(),
-  endY: z.number().int().nonnegative(),
+  startX: z.number().int(),
+  startY: z.number().int(),
+  endX: z.number().int(),
+  endY: z.number().int(),
 });
 
 export const ambianceTypeSchema = z.object({ id: z.string(), title: z.string(), url: z.string() });
+
+export const platformSchema = z.object({
+  id: z.string(), name: z.string().min(1).max(100),
+  startX: z.number().int(), startY: z.number().int(), endX: z.number().int(), endY: z.number().int(), z: z.number().int(),
+});
 
 const doorOperation = z.enum(['add','update','remove','open','close','lock','unlock','keypad_begin','keypad_digit','keypad_cancel']);
 export const doorSchema = z.object({
@@ -137,6 +145,7 @@ export const welcomeMessageSchema = z.object({
   structures: z.array(wallStructureSchema).optional(),
   ambiances: z.array(ambianceRegionSchema).optional(),
   regions: z.array(namedRegionSchema).optional(),
+  platforms: z.array(platformSchema).optional(),
   worldConfig: z
     .object({
       gridSize: z.number().int().positive(),
@@ -535,6 +544,11 @@ export const regionUpsertSchema = z.object({
   type: z.literal('region_upsert'),
   region: namedRegionSchema,
 });
+export const platformUpsertSchema = z.object({ type: z.literal('platform_upsert'), platform: platformSchema });
+export const platformRemoveSchema = z.object({ type: z.literal('platform_remove'), platformId: z.string() });
+export const platformActionResultSchema = z.object({
+  type: z.literal('platform_action_result'), ok: z.boolean(), message: z.string(), platformId: z.string().optional(), requestId: z.string().optional(),
+});
 export const regionRemoveSchema = z.object({
   type: z.literal('region_remove'),
   regionId: z.string(),
@@ -575,6 +589,7 @@ const checkpointResultSchema = z.object({
 const worldRestoredSchema = z.object({
   type: z.literal('world_restored'), items: z.array(itemSchema), structures: z.array(wallStructureSchema),
   ambiances: z.array(ambianceRegionSchema), regions: z.array(namedRegionSchema),
+  platforms: z.array(platformSchema).optional(),
 });
 export type CheckpointSummary = z.infer<typeof checkpointSummarySchema>;
 export type CheckpointPreview = z.infer<typeof checkpointPreviewSchema>;
@@ -616,6 +631,9 @@ export const incomingMessageSchema = z.discriminatedUnion('type', [
   regionUpsertSchema,
   regionRemoveSchema,
   regionActionResultSchema,
+  platformUpsertSchema,
+  platformRemoveSchema,
+  platformActionResultSchema,
   worldSoundSchema,
   checkpointResultSchema,
   worldRestoredSchema,
@@ -666,6 +684,9 @@ export type OutgoingMessage =
   | { type: 'item_use'; itemId: string }
   | { type: 'item_secondary_use'; itemId: string }
   | { type: 'region_add' }
+  | { type: 'platform_add'; requestId?: string; name: string; startX: number; startY: number; endX: number; endY: number; z: number }
+  | { type: 'platform_update'; platformId: string; requestId?: string; name?: string; startX?: number; startY?: number; endX?: number; endY?: number; z?: number }
+  | { type: 'platform_delete'; platformId: string; requestId?: string }
   | { type: 'region_update'; regionId: string; name?: string }
   | { type: 'region_resize'; regionId: string; edge: 'west' | 'east' | 'south' | 'north'; delta: -1 | 1 }
   | { type: 'region_slide'; regionId: string; axis: 'x' | 'y'; delta: -1 | 1 }

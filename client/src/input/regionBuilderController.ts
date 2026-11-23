@@ -1,5 +1,6 @@
 import { handleMenuRowKey } from './listController';
 import { getEditSessionAction } from './editSession';
+import { coordinateMetadata } from './coordinateControls';
 import { describePropertyHelp, formatPropertyRow } from './propertyControls';
 import type { NamedRegion } from '../state/gameState';
 import { containingRegions } from '../state/regions';
@@ -137,6 +138,7 @@ export function createRegionBuilderController(deps: WorldBuilderDeps, onBack: ()
     }, openList, (entry) => {
       if (entry.id === 'delete') return entry.tooltip;
       return describePropertyHelp(entry.label, {
+        ...(entry.id in EDGES ? coordinateMetadata(entry.tooltip) : {}),
         valueType: entry.id === 'name' ? 'text' : 'number',
         tooltip: entry.tooltip,
         ...(entry.id === 'name' ? { maxLength: 100 } : {}),
