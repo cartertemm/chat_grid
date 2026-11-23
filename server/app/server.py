@@ -1801,13 +1801,17 @@ class SignalingServer:
         return True
 
     def _validate_platform_world(
-        self, geometry: PlatformService, *, deleting: bool = False
+        self, geometry: PlatformService, *, relocate_players: bool
     ) -> None:
         """Reject geometry changes that remove required standing or authored support."""
-        if not deleting and not geometry.contains(*self.platform_service.spawn()):
+        if not relocate_players and not geometry.contains(
+            *self.platform_service.spawn()
+        ):
             raise PlatformError("The world's spawn needs platform support.")
         for client in self.clients.values():
-            if not deleting and not geometry.contains(client.x, client.y, client.z):
+            if not relocate_players and not geometry.contains(
+                client.x, client.y, client.z
+            ):
                 raise PlatformError(
                     f"{client.nickname} is standing on the affected platform."
                 )
@@ -1903,23 +1907,29 @@ class SignalingServer:
             )
             platform_id = getattr(packet, "platformId", None)
             removed = isinstance(packet, PlatformDeletePacket)
+            previous = self.platform_service.platforms.get(platform_id or "")
+            relocate_players = previous is not None and (
+                removed or values.get("z", previous.z) == previous.z
+            )
             platform = self.platform_service.mutate(
                 platform_id,
                 values,
                 delete=removed,
                 validate_world=lambda geometry: self._validate_platform_world(
-                    geometry, deleting=removed
+                    geometry, relocate_players=relocate_players
                 ),
             )
             relocated = []
-            if removed:
+            if previous is not None and relocate_players:
                 destination = self.platform_service.spawn()
                 for occupant in self.clients.values():
                     if (
                         occupant.elevator_id is None
-                        and occupant.z == platform.z
-                        and platform.startX <= occupant.x <= platform.endX
-                        and platform.startY <= occupant.y <= platform.endY
+                        and previous.contains(occupant.x, occupant.y, occupant.z)
+                        and (
+                            removed
+                            or not platform.contains(occupant.x, occupant.y, occupant.z)
+                        )
                     ):
                         occupant.x, occupant.y, occupant.z = destination
                         self._persist_client_position(occupant, force=True)

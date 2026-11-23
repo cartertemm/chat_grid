@@ -145,6 +145,39 @@ async def test_delete_relocates_occupants_and_persists_and_broadcasts_positions(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("floor,expected", [(40, (0, 0, 0)), (0, (5, 0, 0))])
+async def test_shrink_moves_only_users_who_lose_support(world, floor, expected):
+    builder = world.join("Builder", x=5, y=4, z=floor)
+    displaced = world.join("Displaced", x=4, y=4, z=floor)
+    platform_id = "ground" if floor == 0 else "second-floor"
+    await world.server._handle_message(
+        builder,
+        json.dumps(dict(type="platform_update", platformId=platform_id, startX=5)),
+    )
+    assert world.transport.last_packet_of_type(builder, PlatformActionResultPacket).ok
+    assert (builder.x, builder.y, builder.z) == (5, 4, floor)
+    assert (displaced.x, displaced.y, displaced.z) == expected
+    for viewer in (builder, displaced):
+        updates = world.transport.packets_of_type(viewer, BroadcastPositionPacket)
+        assert [packet.id for packet in updates] == [displaced.id]
+
+
+@pytest.mark.asyncio
+async def test_item_in_trimmed_area_blocks_resize_and_relocation(world):
+    builder = world.join("Builder", x=1, y=1)
+    server = world.server
+    server.item_service.add_item(server.item_service.default_item(builder, "widget"))
+    await server._handle_message(
+        builder, json.dumps(dict(type="platform_update", platformId="ground", startX=5))
+    )
+    result = world.transport.last_packet_of_type(builder, PlatformActionResultPacket)
+    assert not result.ok and "support" in result.message
+    assert server.platform_service.platforms["ground"].startX == 0
+    assert (builder.x, builder.y, builder.z) == (1, 1, 0)
+    assert not world.transport.packets_of_type(builder, BroadcastPositionPacket)
+
+
+@pytest.mark.asyncio
 async def test_platform_deleted_between_welcome_and_activation(world):
     builder = world.join("Builder")
     joining = world.connect("Joining", authenticated=True, x=10, y=10, z=40)

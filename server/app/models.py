@@ -715,6 +715,14 @@ class Platform(BaseModel):
     endY: WorldCoordinate
     z: WorldCoordinate
 
+    def contains(self, x: int, y: int, z: int) -> bool:
+        """Return whether the cell lies on this platform, including its edges."""
+        return (
+            self.z == z
+            and self.startX <= x <= self.endX
+            and self.startY <= y <= self.endY
+        )
+
 
 class PlatformUpsertPacket(BasePacket):
     """Publish complete platform geometry."""

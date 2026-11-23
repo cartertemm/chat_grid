@@ -92,7 +92,7 @@ type MessageHandlerDeps = {
   handleStructureActionResult: (message: Extract<IncomingMessage, { type: 'structure_action_result' }>) => void;
   handleRegionActionResult?: (message: Extract<IncomingMessage, { type: 'region_action_result' }>) => void;
   handlePlatformActionResult?: (message: Extract<IncomingMessage, { type: 'platform_action_result' }>) => void;
-  handlePlatformRemoved?: () => void;
+  handlePlatformGeometryChanged?: () => void;
   handleAmbianceActionResult: (message: Extract<IncomingMessage, { type: 'ambiance_action_result' }>) => void;
   handleTeleportTransition: (message: Extract<IncomingMessage, { type: 'teleport_transition' }>) => void;
   connectToLiveKit: (url: string, token: string) => void;
@@ -170,10 +170,11 @@ export function createOnMessageHandler(deps: MessageHandlerDeps): (message: Inco
         break;
       case 'platform_upsert':
         deps.state.platforms.set(message.platform.id, message.platform);
+        deps.handlePlatformGeometryChanged?.();
         break;
       case 'platform_remove':
         deps.state.platforms.delete(message.platformId);
-        deps.handlePlatformRemoved?.();
+        deps.handlePlatformGeometryChanged?.();
         break;
       case 'region_upsert':
         deps.state.regions.set(message.region.id, message.region);

@@ -71,11 +71,7 @@ class PlatformService:
     def platform_at(self, x: int, y: int, z: int) -> Platform | None:
         """Return the authored platform at one world cell."""
         for platform in self.platforms.values():
-            if (
-                platform.z == z
-                and platform.startX <= x <= platform.endX
-                and platform.startY <= y <= platform.endY
-            ):
+            if platform.contains(x, y, z):
                 return platform
         return None
 
