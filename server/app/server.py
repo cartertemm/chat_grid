@@ -137,6 +137,7 @@ from .models import (
     UserLeftPacket,
     WelcomeReadyPacket,
     WelcomePacket,
+    WorldRestoredPacket,
     WallStructure,
     WorldSoundPacket,
     WorldItem,
@@ -1274,6 +1275,14 @@ class SignalingServer:
         client.world_ready = True
         self._persist_client_last_seen(client, force=True)
         self.clients[client.websocket] = client
+        # A platform can disappear between welcome and joining the active roster.
+        if not self.platform_service.contains(client.x, client.y, client.z):
+            client.x, client.y, client.z = self.platform_service.spawn()
+            self._persist_client_position(client, force=True)
+            await self.delivery.send(
+                client, WorldRestoredPacket(type="world_restored", **public_world(self))
+            )
+            await self.delivery.send(client, client_position_packet(client))
         LOGGER.info(
             "client authenticated id=%s user_id=%s username=%s total=%d",
             client.id,
@@ -1791,12 +1800,14 @@ class SignalingServer:
         )
         return True
 
-    def _validate_platform_world(self, geometry: PlatformService) -> None:
+    def _validate_platform_world(
+        self, geometry: PlatformService, *, deleting: bool = False
+    ) -> None:
         """Reject geometry changes that remove required standing or authored support."""
-        if not geometry.contains(*self.platform_service.spawn()):
+        if not deleting and not geometry.contains(*self.platform_service.spawn()):
             raise PlatformError("The world's spawn needs platform support.")
         for client in self.clients.values():
-            if not geometry.contains(client.x, client.y, client.z):
+            if not deleting and not geometry.contains(client.x, client.y, client.z):
                 raise PlatformError(
                     f"{client.nickname} is standing on the affected platform."
                 )
@@ -1896,8 +1907,23 @@ class SignalingServer:
                 platform_id,
                 values,
                 delete=removed,
-                validate_world=self._validate_platform_world,
+                validate_world=lambda geometry: self._validate_platform_world(
+                    geometry, deleting=removed
+                ),
             )
+            relocated = []
+            if removed:
+                destination = self.platform_service.spawn()
+                for occupant in self.clients.values():
+                    if (
+                        occupant.elevator_id is None
+                        and occupant.z == platform.z
+                        and platform.startX <= occupant.x <= platform.endX
+                        and platform.startY <= occupant.y <= platform.endY
+                    ):
+                        occupant.x, occupant.y, occupant.z = destination
+                        self._persist_client_position(occupant, force=True)
+                        relocated.append(occupant)
             self._request_state_save()
             broadcast = (
                 PlatformRemovePacket(type="platform_remove", platformId=platform.id)
@@ -1905,6 +1931,9 @@ class SignalingServer:
                 else PlatformUpsertPacket(type="platform_upsert", platform=platform)
             )
             await self.delivery.broadcast(broadcast)
+            for occupant in relocated:
+                await self.delivery.broadcast(client_position_packet(occupant))
+                await self.item_runtime.sync_carried_items(occupant)
             message = (
                 f"Deleted {platform.name}."
                 if removed

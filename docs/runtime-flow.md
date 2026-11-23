@@ -8,6 +8,8 @@ Movement prediction and server validation check the destination cell. A diagonal
 
 Location announcements use the name of the platform under the reported position. The canvas follows the local player on larger maps. A platform checkpoint restores its geometry together with the objects that depend on it.
 
+Deleting a platform moves its occupants to `0, 0, 0` when that cell remains supported. Otherwise they move to the lowest X/Y corner of the first remaining platform. The server saves and broadcasts their corrected positions. Item support and required landings may block deletion, and the final platform must remain. Client list travel toward a deleted platform stops before the relocation packet is applied.
+
 ## Connect Flow
 
 1. User clicks connect.

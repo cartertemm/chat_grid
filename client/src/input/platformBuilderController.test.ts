@@ -81,7 +81,9 @@ describe('platform coordinate editing', () => {
     for (let i = 0; i < 6; i++) controller.handleActions('ArrowDown', 'ArrowDown');
     controller.handleActions('Enter', 'Enter');
     expect(send).not.toHaveBeenCalled();
-    expect(openConfirmation).toHaveBeenCalledWith(expect.objectContaining({ prompt: 'Delete Ground?' }));
+    expect(openConfirmation).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: 'Delete Ground? People on it move to 0, 0, 0, or the lowest corner of the first remaining platform.',
+    }));
     openConfirmation.mock.calls[0][0].onConfirm();
     expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: 'platform_delete', platformId: 'ground' }));
   });

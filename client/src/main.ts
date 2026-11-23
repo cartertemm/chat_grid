@@ -1973,6 +1973,14 @@ const onAppMessage = createOnMessageHandler({
   handleStructureActionResult: (message) => worldBuilderController.handleActionResult(message),
   handleRegionActionResult: (message) => worldBuilderController.handleRegionActionResult(message),
   handlePlatformActionResult: (message) => worldBuilderController.handlePlatformActionResult(message),
+  handlePlatformRemoved: () => {
+    if (!activeTeleport || platformAt(state.platforms, activeTeleport.targetX, activeTeleport.targetY, state.player.z)) return;
+    activeTeleport = null;
+    activeTeleportLoopToken += 1;
+    stopTeleportLoopAudio();
+    state.keysPressed = {};
+    void refreshAudioSubscriptions(true);
+  },
   handleAmbianceActionResult: (message) => worldBuilderController.handleAmbianceActionResult(message),
   handleTeleportTransition: (message) => teleportTransition.handle(message),
   connectToLiveKit: (url, token) => {

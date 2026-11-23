@@ -69,7 +69,7 @@ export function createPlatformBuilderController(deps: WorldBuilderDeps, back: ()
     return [
       ...PROPERTIES.map((entry) => ({ ...entry, label: platform ? formatPropertyRow(entry.label, platform[entry.id]) : entry.label })),
       draft ? { id: 'create', label: 'Create platform', tooltip: 'Validate these coordinates and add the platform.' }
-        : { id: 'delete', label: 'Delete platform', tooltip: 'Delete this platform after confirmation. Occupied or required cells must remain supported.' },
+        : { id: 'delete', label: 'Delete platform', tooltip: 'Delete this platform after confirmation. People move to 0, 0, 0, or the lowest corner of the first remaining platform. Required item support and a remaining platform are needed.' },
     ];
   }
 
@@ -195,7 +195,7 @@ export function createPlatformBuilderController(deps: WorldBuilderDeps, back: ()
       } else if (selectedId) {
         const id = selectedId;
         const confirmationSession = session;
-        deps.openConfirmation({ prompt: `Delete ${platform.name}?`, onConfirm: () => {
+        deps.openConfirmation({ prompt: `Delete ${platform.name}? People on it move to 0, 0, 0, or the lowest corner of the first remaining platform.`, onConfirm: () => {
           if (confirmationSession !== session || !allowed() || pending) return;
           if (!deps.state.platforms.has(id)) {
             openList();

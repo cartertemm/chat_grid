@@ -128,11 +128,10 @@ class PlatformService:
         return True
 
     def spawn(self) -> tuple[int, int, int]:
-        """Return the stable first standing cell in the authored world."""
-        platform = min(
-            self.platforms.values(),
-            key=lambda p: (p.id != "ground", p.z, p.startX, p.startY, p.id),
-        )
+        """Prefer the origin, then the minimum corner of the first saved platform."""
+        if self.contains(0, 0, 0):
+            return 0, 0, 0
+        platform = next(iter(self.platforms.values()))
         return platform.startX, platform.startY, platform.z
 
     def find_placement(
@@ -232,9 +231,15 @@ class PlatformService:
         if candidate is None:
             raise PlatformError("Platform not found.")
         proposed = self.dump_state()
-        proposed = [entry for entry in proposed if entry["id"] != candidate.id]
-        if not delete:
+        if delete:
+            proposed = [entry for entry in proposed if entry["id"] != candidate.id]
+        elif current is None:
             proposed.append(candidate.model_dump())
+        else:
+            proposed = [
+                candidate.model_dump() if entry["id"] == candidate.id else entry
+                for entry in proposed
+            ]
         staged = PlatformService(state_file=None, grid_size=self.grid_size)
         staged.restore_state(proposed)
         removes_support = delete or (
