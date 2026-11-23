@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from .client import ClientConnection
 from .models import NamedRegion
+from .platform_service import PlatformService
 from .state_files import read_state_text, set_aside_unreadable, write_json_atomic
 
 LOGGER = logging.getLogger("chgrid.server.regions")
@@ -32,19 +33,23 @@ class RegionService:
         state_file: Path | None,
         grid_size: int,
         floor_elevations: Iterable[int] = DEFAULT_FLOOR_ELEVATIONS,
+        geometry: PlatformService | None = None,
     ) -> None:
         """Load named regions from the configured world dataset."""
 
         self.state_file = state_file
         self.grid_size = max(1, int(grid_size))
         self.floor_elevations = frozenset(int(value) for value in floor_elevations)
+        self.geometry = geometry
         self.regions: dict[str, NamedRegion] = {}
         self.load_state()
 
     def add_region(self, client: ClientConnection) -> NamedRegion:
         """Create a one-cell region at the caller's position and floor."""
 
-        if client.z not in self.floor_elevations:
+        if client.z not in (
+            self.geometry.elevations if self.geometry else self.floor_elevations
+        ):
             raise RegionError("Regions can only be added on a valid floor.")
         region = NamedRegion(
             id=str(uuid.uuid4()),
@@ -208,6 +213,10 @@ class RegionService:
 
         if region.startX > region.endX or region.startY > region.endY:
             raise RegionError("Region must have a positive area.")
+        if self.geometry is not None:
+            if region.floorZ not in self.geometry.elevations:
+                raise RegionError("Regions need an elevation with a platform.")
+            return
         if not (
             0 <= region.startX < self.grid_size
             and 0 <= region.endX < self.grid_size

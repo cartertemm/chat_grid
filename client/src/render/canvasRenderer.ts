@@ -1,4 +1,4 @@
-import { GRID_SIZE, isItemOnFloor, type GameState, type PeerState, type WorldItem } from '../state/gameState';
+import { GRID_SIZE, hasItemBounds, itemBounds, isItemOnFloor, type GameState, type PeerState, type WorldItem } from '../state/gameState';
 
 export class CanvasRenderer {
   private readonly ctx: CanvasRenderingContext2D;
@@ -17,13 +17,35 @@ export class CanvasRenderer {
 
   setGridSize(gridSize: number): void {
     if (!Number.isInteger(gridSize) || gridSize <= 0) return;
-    this.gridSize = gridSize;
+    this.gridSize = Math.min(gridSize, GRID_SIZE);
     this.squarePixelSize = this.canvas.width / this.gridSize;
   }
 
   draw(state: GameState): void {
     const { ctx } = this;
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    // Keep the original two floors framed as before. Follow players on an expanded map.
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const platform of state.platforms.values()) {
+      if (platform.z !== state.player.z) continue;
+      minX = Math.min(minX, platform.startX);
+      minY = Math.min(minY, platform.startY);
+      maxX = Math.max(maxX, platform.endX);
+      maxY = Math.max(maxY, platform.endY);
+    }
+    const origin = (position: number, min: number, max: number) => Number.isFinite(min)
+      ? Math.max(min, Math.min(Math.floor(position - this.gridSize / 2), max - this.gridSize + 1)) : 0;
+    const left = origin(state.player.x, minX, maxX);
+    const bottom = origin(state.player.y, minY, maxY);
+    ctx.save();
+    ctx.translate(-left * this.squarePixelSize, bottom * this.squarePixelSize);
+    ctx.fillStyle = '#1e293b';
+    for (const platform of state.platforms.values()) {
+      if (platform.z === state.player.z) ctx.fillRect(platform.startX * this.squarePixelSize,
+        this.canvas.height - (platform.endY + 1) * this.squarePixelSize,
+        (platform.endX - platform.startX + 1) * this.squarePixelSize,
+        (platform.endY - platform.startY + 1) * this.squarePixelSize);
+    }
     ctx.fillStyle = 'rgba(45, 212, 191, 0.12)';
     for (const ambiance of state.ambiances.values()) {
       if (ambiance.floorZ !== state.player.z) continue;
@@ -37,10 +59,12 @@ export class CanvasRenderer {
     ctx.strokeStyle = '#374151';
     for (let i = 0; i <= this.gridSize; i += 1) {
       ctx.beginPath();
-      ctx.moveTo(i * this.squarePixelSize, 0);
-      ctx.lineTo(i * this.squarePixelSize, this.canvas.height);
-      ctx.moveTo(0, i * this.squarePixelSize);
-      ctx.lineTo(this.canvas.width, i * this.squarePixelSize);
+      const x = (left + i) * this.squarePixelSize;
+      const y = (i - bottom) * this.squarePixelSize;
+      ctx.moveTo(x, -bottom * this.squarePixelSize);
+      ctx.lineTo(x, this.canvas.height - bottom * this.squarePixelSize);
+      ctx.moveTo(left * this.squarePixelSize, y);
+      ctx.lineTo(this.canvas.width + left * this.squarePixelSize, y);
       ctx.stroke();
     }
 
@@ -70,13 +94,17 @@ export class CanvasRenderer {
     for (const item of state.items.values()) {
       if (item.carrierId) continue;
       if (!isItemOnFloor(item, state.player.z)) continue;
-      for (const offset of item.occupiedOffsets) {
-        this.drawItem(item, offset.x, offset.y);
+      if (hasItemBounds(item)) {
+        const bounds = itemBounds(item);
+        this.drawItem(item, 0, 0, bounds.endX - item.x + 1, bounds.endY - item.y + 1);
+      } else {
+        for (const offset of item.occupiedOffsets) this.drawItem(item, offset.x, offset.y);
       }
     }
     this.drawObject(state.player, '#34d399', state.player.nickname);
+    ctx.restore();
 
-    if (state.mode === 'nickname' || state.mode === 'chat' || state.mode === 'itemPropertyEdit' || state.mode === 'worldBuilderAmbianceEdit' || state.mode === 'worldBuilderRegionEdit') {
+    if (state.mode === 'nickname' || state.mode === 'chat' || state.mode === 'itemPropertyEdit' || state.mode === 'worldBuilderAmbianceEdit' || state.mode === 'worldBuilderRegionEdit' || state.mode === 'worldBuilderPlatformEdit') {
       const label =
         state.mode === 'nickname' ? 'New Nickname' : state.mode === 'chat' ? 'Message' : 'Property Value';
       this.drawTextOverlay(state, label);
@@ -114,7 +142,7 @@ export class CanvasRenderer {
     }
   }
 
-  private drawItem(item: WorldItem, offsetX: number, offsetY: number): void {
+  private drawItem(item: WorldItem, offsetX: number, offsetY: number, width = 1, depth = 1): void {
     const drawX = (item.x + offsetX) * this.squarePixelSize;
     const drawY = this.canvas.height - ((item.y + offsetY) * this.squarePixelSize) - this.squarePixelSize;
     this.ctx.fillStyle =
@@ -131,7 +159,7 @@ export class CanvasRenderer {
             : item.type === 'widget'
               ? '#22d3ee'
               : '#60a5fa';
-    this.ctx.fillRect(drawX, drawY, this.squarePixelSize, this.squarePixelSize);
+    this.ctx.fillRect(drawX, drawY - (depth - 1) * this.squarePixelSize, width * this.squarePixelSize, depth * this.squarePixelSize);
     this.ctx.fillStyle = '#111827';
     this.ctx.font = 'bold 12px Courier New';
     this.ctx.textAlign = 'center';

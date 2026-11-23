@@ -18,6 +18,8 @@ import {
 } from './propertyControls';
 import { createCheckpointController } from './checkpointController';
 import { createRegionBuilderController } from './regionBuilderController';
+import { createPlatformBuilderController } from './platformBuilderController';
+import type { FootstepSet } from '../state/platformGeometry';
 import { createAmbianceBuilderController } from './ambianceBuilderController';
 import type { AmbianceType } from '../state/gameState';
 
@@ -47,6 +49,7 @@ const ROOT_ACTIONS = [
   { id: 'addRegion', label: 'Add region', tooltip: 'Create a one-square named region at your current position.' },
   { id: 'editRegions', label: 'Edit regions', tooltip: 'Choose a named region on this floor to edit.' },
   { id: 'checkpoints', label: 'World checkpoints', tooltip: 'Save the authored world, preview checkpoints, or restore one.' },
+  { id: 'platforms', label: 'Platforms', tooltip: 'Create or edit flat platforms, including disconnected islands.' },
 ] as const;
 const DIRECTIONS = [
   { id: 'north', label: 'North', tooltip: 'Place the wall along the north edge of your current square.' },
@@ -144,6 +147,7 @@ export function createWorldBuilderController(deps: WorldBuilderDeps) {
   }
   const checkpointController = createCheckpointController(deps, open);
   const regionBuilderController = createRegionBuilderController(deps, open);
+  const platformBuilderController = createPlatformBuilderController(deps, open);
   const ambianceBuilderController = createAmbianceBuilderController({
     ...deps,
     onBackToRoot: () => open(),
@@ -209,6 +213,7 @@ export function createWorldBuilderController(deps: WorldBuilderDeps) {
   function rootActions() {
     return ROOT_ACTIONS.filter((entry) => entry.id === 'checkpoints'
       ? deps.hasPermission('world.checkpoint.capture') || deps.hasPermission('world.checkpoint.view')
+      : entry.id === 'platforms' ? deps.hasPermission('world.platform.edit')
       : deps.hasPermission('world.structure.edit'));
   }
 
@@ -272,6 +277,7 @@ export function createWorldBuilderController(deps: WorldBuilderDeps) {
     index = Math.min(index, Math.max(0, rootActions().length - 1));
     handleList(code, key, rootActions(), (entry) => {
       if (entry === 'checkpoints') { checkpointController.open(); return; }
+      if (entry === 'platforms') { platformBuilderController.openList(); return; }
       if (entry === 'addRegion') {
         regionBuilderController.requestAdd();
         return;
@@ -553,6 +559,7 @@ export function createWorldBuilderController(deps: WorldBuilderDeps) {
 
   return {
     setPresets(next: StructurePreset[]) {
+      platformBuilderController.reset();
       checkpointController.reset();
       presets = [...next];
       pendingSettings.length = 0;
@@ -563,6 +570,7 @@ export function createWorldBuilderController(deps: WorldBuilderDeps) {
     setAmbianceTypes(next: AmbianceType[]) {
       ambianceBuilderController.setTypes(next);
     },
+    setFootstepSets: (next: FootstepSet[]) => platformBuilderController.setFootstepSets(next),
     open,
     handleRoot,
     handleCheckpointInput: checkpointController.handleInput,
@@ -575,6 +583,14 @@ export function createWorldBuilderController(deps: WorldBuilderDeps) {
     handlePropertyList,
     handlePropertyEdit,
     handleRegionList: regionBuilderController.handleList,
+    handlePlatformList: platformBuilderController.handleList,
+    handlePlatformActions: platformBuilderController.handleActions,
+    handlePlatformEdit: platformBuilderController.handleEdit,
+    handlePlatformActionResult: platformBuilderController.handleActionResult,
+    resetPlatformEditor: platformBuilderController.reset,
+    reconcilePlatforms: platformBuilderController.reconcileWorld,
+    getEditingPlatformMaxLength: platformBuilderController.getEditingMaxLength,
+    getPlatformTextEntry: platformBuilderController.getTextEntry,
     handleRegionActions: regionBuilderController.handleActions,
     handleRegionEdit: regionBuilderController.handleEdit,
     handleRegionActionResult: regionBuilderController.handleActionResult,

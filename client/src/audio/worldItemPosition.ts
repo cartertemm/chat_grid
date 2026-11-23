@@ -1,4 +1,4 @@
-import type { WorldItem } from '../state/gameState';
+import { getNearestItemPosition, hasItemBounds, type WorldItem } from '../state/gameState';
 
 export type WorldItemSourcePosition = {
   x: number;
@@ -17,10 +17,15 @@ export type WorldItemSourcePosition = {
 export function resolveWorldItemSourcePosition(
   item: WorldItem,
   listenerZ: number,
+  listenerX?: number,
+  listenerY?: number,
 ): WorldItemSourcePosition {
   const floorZs = item.params.floorZs;
   const sourceZ = Array.isArray(floorZs) && floorZs.some((floorZ) => Number(floorZ) === listenerZ)
     ? listenerZ
-    : item.z;
-  return { x: item.x, y: item.y, z: sourceZ };
+    : Math.max(item.z, Math.min(item.endZ ?? item.z, listenerZ));
+  const position = hasItemBounds(item) && listenerX !== undefined && listenerY !== undefined
+    ? getNearestItemPosition(item, listenerX, listenerY)
+    : { x: item.x, y: item.y };
+  return { ...position, z: sourceZ };
 }

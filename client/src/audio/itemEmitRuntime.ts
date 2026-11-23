@@ -437,7 +437,7 @@ export class ItemEmitRuntime {
       const acoustic = normalizeAcousticMix(this.getAcousticMix(item));
       const acousticGain = acoustic.gain;
       applyAcousticLowpass(audioCtx, output.occlusionFilter, acoustic.lowpassHz);
-      const sourcePosition = resolveWorldItemSourcePosition(item, playerPosition.z);
+      const sourcePosition = resolveWorldItemSourcePosition(item, playerPosition.z, playerPosition.x, playerPosition.y);
       const mix = acousticGain > 0 ? resolveSpatialMix({
         dx: sourcePosition.x - playerPosition.x,
         dy: sourcePosition.y - playerPosition.y,
@@ -477,9 +477,10 @@ export class ItemEmitRuntime {
     const spatialConfig = this.getSpatialConfig(item);
     const baseRange = Math.max(1, spatialConfig.range || HEARING_RADIUS);
     const threshold = baseRange + (currentlyActive ? UNSUBSCRIBE_HYSTERESIS_SQUARES : SUBSCRIBE_PRELOAD_SQUARES);
-    return listenerPositions.some((listenerPosition) =>
-      Math.hypot(item.x - listenerPosition.x, item.y - listenerPosition.y) <= threshold,
-    );
+    return listenerPositions.some((listenerPosition) => {
+      const nearest = resolveWorldItemSourcePosition(item, listenerPosition.z, listenerPosition.x, listenerPosition.y);
+      return Math.hypot(nearest.x - listenerPosition.x, nearest.y - listenerPosition.y, nearest.z - listenerPosition.z) <= threshold;
+    });
   }
 
   private tryStartEmitPlayback(itemId: string, element: HTMLAudioElement): void {

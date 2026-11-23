@@ -20,7 +20,7 @@ type Deps = {
   status: (text: string) => void;
   normal: () => void;
   focusGrid: () => void;
-  gridSize: () => number;
+  hasPlatform: (x: number, y: number, z: number) => boolean;
   cue: (success: boolean) => void;
   blip: () => void;
   keypadSound: (name: 'keypad' | 'keypad_good' | 'keypad_bad') => Promise<void>;
@@ -101,9 +101,13 @@ export function createDoorControls(deps: Deps) {
       onSelect(id) {
         if (id === 'add') {
           const horizontal = wall.orientation === 'horizontal';
-          const line = horizontal ? wall.startY : wall.startX;
           const options = Array.from({ length: wall.length }, (_, i) => i)
-            .filter((i) => line > 0 && line < deps.gridSize() && !doors.some((d) => d.offset === i))
+            .filter((i) => {
+              const x = wall.startX + (horizontal ? i : 0);
+              const y = wall.startY + (horizontal ? 0 : i);
+              return !doors.some((d) => d.offset === i) && deps.hasPlatform(x, y, wall.floorZ)
+                && deps.hasPlatform(x - (horizontal ? 0 : 1), y - (horizontal ? 1 : 0), wall.floorZ);
+            })
             .map((i) => ({
               id: String(i),
               label:

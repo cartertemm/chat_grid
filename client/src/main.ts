@@ -57,6 +57,9 @@ import { createOnMessageHandler } from './network/messageHandlers';
 import { SignalingClient } from './network/signalingClient';
 import { nextHeartbeatState } from './network/reconnectPolicy';
 import { CanvasRenderer } from './render/canvasRenderer';
+import { canWalkTo, nearestLanding, platformAt } from './state/platformGeometry';
+import type { FootstepSet } from './state/platformGeometry';
+import { footstepSample } from './audio/footsteps';
 import {
   GRID_SIZE,
   MOVE_COOLDOWN_MS,
@@ -68,6 +71,8 @@ import {
   getNearestPeer,
   isItemOnFloor,
   itemOccupiesPosition,
+  hasItemBounds,
+  itemBounds,
   type StructurePreset,
   type GameMode,
   type PeerState,
@@ -326,7 +331,7 @@ const AUTH_SESSION_COOKIE_SET_URL = withBase('auth/session/set');
 const AUTH_SESSION_COOKIE_CLEAR_URL = withBase('auth/session/clear');
 const AUTH_SESSION_COOKIE_CLIENT_HEADER = 'X-Chgrid-Auth-Client';
 const ACTION_SOUND_URL = withBase('sounds/action.ogg');
-const FOOTSTEP_SOUND_URLS = Array.from({ length: 11 }, (_, index) => withBase(`sounds/step-${index + 1}.ogg`));
+let footstepSets: FootstepSet[] = [];
 const TELEPORT_START_SOUND_URL = withBase('sounds/teleport_start.ogg');
 const TELEPORT_START_GAIN = 0.1;
 const TELEPORT_SOUND_URL = withBase('sounds/teleport.ogg');
@@ -339,10 +344,6 @@ const settings = new SettingsStore();
 const voiceMutes = new VoiceMutePreferences(settings);
 let worldGridSize = GRID_SIZE;
 let movementTickMs = MOVE_COOLDOWN_MS;
-let worldFloors = new Map<number, string>([
-  [0, 'Ground floor'],
-  [40, 'Second floor'],
-]);
 let wallEdgeIndex = buildWallEdgeIndex(state.structures.values());
 let lastWallCollisionDirection: string | null = null;
 let statusTimeout: number | null = null;
@@ -372,7 +373,7 @@ function wallAcousticMixTo(sourceX: number, sourceY: number, sourceZ: number) {
 }
 
 function itemWallAcousticMix(item: WorldItem) {
-  const source = resolveWorldItemSourcePosition(item, state.player.z);
+  const source = resolveWorldItemSourcePosition(item, state.player.z, state.player.x, state.player.y);
   return wallAcousticMixTo(source.x, source.y, source.z);
 }
 
@@ -386,7 +387,7 @@ function resolveWorldAcousticMix(source: SpatialAudioPosition, listener: Spatial
 
 function itemAcousticMix(item: WorldItem) {
   return resolveWorldAcousticMix({
-    ...resolveWorldItemSourcePosition(item, state.player.z),
+    ...resolveWorldItemSourcePosition(item, state.player.z, state.player.x, state.player.y),
     acousticZoneId: worldItemAcousticZoneId(item, state.player.acousticZoneId, state.items),
   }, state.player);
 }
@@ -677,7 +678,7 @@ const doorControls = createDoorControls({
   choose: (request) => optionSelector.open(request),
   confirm: (request) => confirmationController.open(request),
   status: updateStatus, normal: () => { state.mode = 'normal'; },
-  focusGrid: () => dom.canvas.focus(), gridSize: () => worldGridSize,
+  focusGrid: () => dom.canvas.focus(), hasPlatform: (x, y, z) => Boolean(platformAt(state.platforms, x, y, z)),
   cue: (success) => success ? audio.sfxUiConfirm() : audio.sfxUiCancel(),
   keypadSound: (name) => audio.playSample(resolveIncomingSoundUrl(`/sounds/${name}.ogg`), 1, 0, true),
 });
@@ -1201,7 +1202,7 @@ function getItemsAtPosition(x: number, y: number): WorldItem[] {
 
 /** Formats a complete world location for speech and lists. */
 function locationPhrase(x: number, y: number, z: number): string {
-  const configuredFloor = worldFloors.get(z);
+  const configuredFloor = platformAt(state.platforms, x, y, z)?.name;
   if (configuredFloor) {
     return `${formatCoordinate(x)}, ${formatCoordinate(y)}, ${formatCoordinate(z)}, ${configuredFloor}`;
   }
@@ -1209,8 +1210,8 @@ function locationPhrase(x: number, y: number, z: number): string {
 }
 
 /** Formats a user's floor for cross-floor teleport feedback. */
-function floorPositionPhrase(z: number): string {
-  const configuredFloor = worldFloors.get(z);
+function floorPositionPhrase(x: number, y: number, z: number): string {
+  const configuredFloor = platformAt(state.platforms, x, y, z)?.name;
   if (configuredFloor) return `on ${configuredFloor}`;
   return `at height ${formatCoordinate(z)}`;
 }
@@ -1267,6 +1268,7 @@ function textInputMaxLengthForMode(mode: typeof state.mode): number | null {
   if (mode === 'micGainEdit') return 8;
   if (mode === 'adminRoleNameEdit') return 32;
   if (mode === 'checkpointLabel') return 100;
+  if (mode === 'worldBuilderPlatformEdit') return worldBuilderController.getEditingPlatformMaxLength();
   if (mode === 'worldBuilderPropertyEdit') return 200;
   if (mode === 'worldBuilderAmbianceEdit' || mode === 'worldBuilderRegionEdit') return 100;
   return null;
@@ -1298,6 +1300,7 @@ function isTextEditingMode(mode: typeof state.mode): boolean {
     mode === 'checkpointLabel' ||
     mode === 'worldBuilderPropertyEdit' ||
     mode === 'worldBuilderAmbianceEdit' ||
+    mode === 'worldBuilderPlatformEdit' ||
     mode === 'worldBuilderRegionEdit'
   );
 }
@@ -1372,8 +1375,8 @@ function formatCoordinate(value: number): string {
 }
 
 /** Picks one random footstep sample URL. */
-function randomFootstepUrl(): string {
-  return FOOTSTEP_SOUND_URLS[Math.floor(Math.random() * FOOTSTEP_SOUND_URLS.length)];
+function randomFootstepUrl(x: number, y: number, z: number): string {
+  return resolveIncomingSoundUrl(footstepSample(footstepSets, platformAt(state.platforms, x, y, z)?.footstepSet));
 }
 
 /** Stops active teleport loop audio, if one is running. */
@@ -1388,8 +1391,21 @@ function startTeleportTo(targetX: number, targetY: number, completionStatus: str
   if (teleportTransition.isActive()) return;
   const startX = state.player.x;
   const startY = state.player.y;
+  const destination = platformAt(state.platforms, targetX, targetY, state.player.z);
+  if (!destination) {
+    updateStatus('No platform at that destination.');
+    audio.sfxUiCancel();
+    return;
+  }
+  if (platformAt(state.platforms, startX, startY, state.player.z)?.id !== destination.id) {
+    // Cross gaps with one authoritative landing. Walking packets would stop at the edge.
+    signaling.send({ type: 'teleport_complete', x: targetX, y: targetY, z: state.player.z });
+    void audio.playSample(TELEPORT_SOUND_URL, WORLD_FOOTSTEP_GAIN);
+    updateStatus(completionStatus);
+    return;
+  }
   const distance = Math.hypot(targetX - startX, targetY - startY);
-  const durationMs = Math.max(1, (distance / TELEPORT_SQUARES_PER_SECOND) * 1000);
+  const durationMs = Math.min(3000, Math.max(1, (distance / TELEPORT_SQUARES_PER_SECOND) * 1000));
   const nowMs = performance.now();
   activeTeleport = {
     startX,
@@ -1520,7 +1536,7 @@ function handleMovement(): void {
   const nextX = state.player.x + dx;
   const nextY = state.player.y + dy;
   const attemptedDirection = `${dx},${dy}`;
-  if (nextX < 0 || nextY < 0 || nextX >= worldGridSize || nextY >= worldGridSize) {
+  if (!canWalkTo(state.platforms, state.player.x, state.player.y, state.player.z, nextX, nextY)) {
     state.player.lastMoveTime = now;
     if (lastWallCollisionDirection !== attemptedDirection) {
       void audio.playSample(WALL_SOUND_URL, 1);
@@ -1571,7 +1587,7 @@ function handleMovement(): void {
   lastWallCollisionDirection = null;
   state.player.lastMoveTime = now;
   void refreshAudioSubscriptions(true);
-  void audio.playSample(randomFootstepUrl(), WORLD_FOOTSTEP_GAIN, movementTickMs);
+  void audio.playSample(randomFootstepUrl(nextX, nextY, state.player.z), WORLD_FOOTSTEP_GAIN, movementTickMs);
   signaling.send({ type: 'update_position', x: nextX, y: nextY, z: state.player.z });
 
   const namesOnTile = getPeerNamesAtPosition(nextX, nextY);
@@ -1849,6 +1865,7 @@ function cancelReconnect(): void {
 
 /** Tears down active session state, media, peers, and UI back to pre-connect mode. */
 function disconnect(): void {
+  worldBuilderController.resetPlatformEditor();
   cancelReconnect();
   connectionAbort?.abort();
   connectionAbort = null;
@@ -1884,13 +1901,14 @@ const onAppMessage = createOnMessageHandler({
   setWorldGridSize: (size) => {
     worldGridSize = size;
   },
-  setWorldFloors: (floors) => {
-    worldFloors = new Map(floors.map((floor) => [floor.z, floor.name]));
-  },
   setStructurePresets: (presets: StructurePreset[]) => worldBuilderController.setPresets(presets),
   setAmbianceTypes: (types) => {
     ambianceRuntime.setTypes(types.map((type) => ({ ...type, url: resolveIncomingSoundUrl(type.url) })));
     worldBuilderController.setAmbianceTypes(types);
+  },
+  setFootstepSets: (sets) => {
+    footstepSets = sets;
+    worldBuilderController.setFootstepSets(sets);
   },
   refreshStructureGeometry: () => {
     wallEdgeIndex = buildWallEdgeIndex(state.structures.values());
@@ -1955,6 +1973,7 @@ const onAppMessage = createOnMessageHandler({
   handleDoorResult: doorControls.result,
   handleCheckpointResult: (message) => worldBuilderController.handleCheckpointResult(message),
   handleWorldRestored: () => {
+    worldBuilderController.resetPlatformEditor();
     worldBuilderController.resetCheckpoints(true);
     doorControls.close();
     teleportTransition.reset();
@@ -1974,6 +1993,20 @@ const onAppMessage = createOnMessageHandler({
   },
   handleStructureActionResult: (message) => worldBuilderController.handleActionResult(message),
   handleRegionActionResult: (message) => worldBuilderController.handleRegionActionResult(message),
+  handlePlatformActionResult: (message) => worldBuilderController.handlePlatformActionResult(message),
+  handlePlatformGeometryChanged: () => {
+    if (!activeTeleport) return;
+    const originSupported = platformAt(state.platforms, activeTeleport.startX, activeTeleport.startY, state.player.z);
+    const targetSupported = platformAt(state.platforms, activeTeleport.targetX, activeTeleport.targetY, state.player.z);
+    if (originSupported && targetSupported) return;
+    state.player.x = activeTeleport.lastSentX;
+    state.player.y = activeTeleport.lastSentY;
+    activeTeleport = null;
+    activeTeleportLoopToken += 1;
+    stopTeleportLoopAudio();
+    state.keysPressed = {};
+    void refreshAudioSubscriptions(true);
+  },
   handleAmbianceActionResult: (message) => worldBuilderController.handleAmbianceActionResult(message),
   handleTeleportTransition: (message) => teleportTransition.handle(message),
   connectToLiveKit: (url, token) => {
@@ -2034,6 +2067,7 @@ async function onSignalingMessage(message: IncomingMessage, onWelcome?: () => vo
   }
   itemBehaviorRegistry.onUseResultMessage(message);
   itemBehaviorRegistry.onWorldUpdate();
+  worldBuilderController.reconcilePlatforms();
   applyConfiguredPeerListenGains();
   if (restartAnnouncement) {
     setConnectionStatus(restartAnnouncement);
@@ -2543,7 +2577,7 @@ function getAvailableCommandPaletteEntriesForMode(mode: GameMode): Array<Command
       voiceSendAllowed: authController.getVoiceSendAllowed(),
       mainHelpAvailable: mainHelpViewerLines.length > 0,
       hasAdminActions: getAvailableAdminActions().length > 0,
-      hasWorldBuilder: ['world.structure.edit', 'world.checkpoint.capture', 'world.checkpoint.view'].some((permission) => authController.hasPermission(permission)),
+      hasWorldBuilder: ['world.structure.edit', 'world.platform.edit', 'world.checkpoint.capture', 'world.checkpoint.view'].some((permission) => authController.hasPermission(permission)),
       itemTypeCount: getItemTypeSequence().length,
       visibleItemCount: Array.from(state.items.values()).filter((item) => !item.carrierId).length,
       userCount: state.peers.size,
@@ -2836,7 +2870,7 @@ function handleListModeInput(code: string, key: string): void {
     const entry = state.peers.get(state.sortedPeerIds[state.listIndex]);
     if (!entry) return;
     if (entry.z !== state.player.z) {
-      updateStatus(`${entry.nickname} is ${floorPositionPhrase(entry.z)}.`);
+      updateStatus(`${entry.nickname} is ${floorPositionPhrase(entry.x, entry.y, entry.z)}.`);
       audio.sfxUiCancel();
       return;
     }
@@ -2887,8 +2921,17 @@ function handleListItemsModeInput(code: string, key: string): void {
       updateStatus('Already here.');
       return;
     }
+    const position = getNearestItemPosition(item, state.player.x, state.player.y);
+    const landing = hasItemBounds(item)
+      ? nearestLanding(state.platforms, itemBounds(item), state.player.z, state.player.x, state.player.y)
+      : position;
+    if (!landing) {
+      updateStatus('No platform beside this item at your elevation.');
+      audio.sfxUiCancel();
+      return;
+    }
     state.mode = 'normal';
-    startTeleportTo(item.x, item.y, `Moved to ${itemLabel(item)}.`);
+    startTeleportTo(landing.x, landing.y, `Moved to ${itemLabel(item)}.`);
     return;
   }
   if (control.type === 'cancel') {
@@ -3098,6 +3141,9 @@ function handleModeInput(input: ModeInput): void {
       worldBuilderWallActions: ({ code: currentCode, key: currentKey }) => worldBuilderController.handleWallActions(currentCode, currentKey),
       worldBuilderPropertyList: ({ code: currentCode, key: currentKey }) => worldBuilderController.handlePropertyList(currentCode, currentKey),
       worldBuilderRegionList: ({ code, key }) => worldBuilderController.handleRegionList(code, key),
+      worldBuilderPlatformList: ({ code, key }) => worldBuilderController.handlePlatformList(code, key),
+      worldBuilderPlatformActions: ({ code, key }) => worldBuilderController.handlePlatformActions(code, key),
+      worldBuilderPlatformEdit: ({ code, key, ctrlKey }) => worldBuilderController.handlePlatformEdit(code, key, ctrlKey),
       worldBuilderRegionActions: ({ code, key }) => worldBuilderController.handleRegionActions(code, key),
       worldBuilderRegionEdit: ({ code, key, ctrlKey }) => worldBuilderController.handleRegionEdit(code, key, ctrlKey),
       worldBuilderAmbianceList: ({ code, key }) => worldBuilderController.handleAmbianceList(code, key),
@@ -3166,6 +3212,9 @@ function getMobileTextEntry(): MobileTextEntry | null {
   }
   if (state.mode === 'worldBuilderRegionEdit') {
     return { label: 'Region name', value: state.nicknameInput, maxLength, inputMode: 'text', submitLabel: 'Save' };
+  }
+  if (state.mode === 'worldBuilderPlatformEdit') {
+    return worldBuilderController.getPlatformTextEntry();
   }
   if (state.mode === 'worldBuilderAmbianceEdit') {
     const label = worldBuilderController.getEditingAmbiancePropertyLabel();

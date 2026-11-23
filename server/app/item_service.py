@@ -7,10 +7,13 @@ import logging
 import time
 import uuid
 from copy import deepcopy
+from collections.abc import Callable
 from pathlib import Path
 from .client import ClientConnection
 from .item_catalog import get_item_definition
+from .item_geometry import item_bounds, move_item, validate_item_bounds
 from .models import PersistedWorldItem, WorldItem
+from .platform_service import PlatformService
 from .state_files import read_state_text, set_aside_unreadable, write_json_atomic
 
 LOGGER = logging.getLogger("chgrid.server")
@@ -19,14 +22,19 @@ LOGGER = logging.getLogger("chgrid.server")
 class ItemService:
     """Owns world-item storage, lifecycle, and persistence to disk."""
 
-    def __init__(self, state_file: Path | None = None):
+    def __init__(
+        self, state_file: Path | None = None, *, geometry: PlatformService | None = None
+    ):
         """Create service and eagerly load persisted state when configured."""
 
         self.state_file = state_file
+        self.geometry = geometry
         self.piano_songs_file = (
             state_file.with_name("piano_songs.json") if state_file else None
         )
         self.items: dict[str, WorldItem] = {}
+        self.resting_positions: dict[str, tuple[int, int, int]] = {}
+        self.drop_placement: Callable[[WorldItem], tuple[int, int, int]] | None = None
         self.piano_songs: dict[str, dict] = {}
         self.load_state()
         self.load_piano_songs()
@@ -73,12 +81,15 @@ class ItemService:
         """Insert or replace an item in in-memory state."""
 
         self.items[item.id] = item
+        if not item.carrierId:
+            self.resting_positions[item.id] = (item.x, item.y, item.z)
 
     def remove_item(self, item_id: str) -> None:
         """Remove an item by id when present."""
 
         if item_id in self.items:
             del self.items[item_id]
+        self.resting_positions.pop(item_id, None)
 
     def find_carried_items(self, client_id: str) -> list[WorldItem]:
         """Return all items currently carried by one client."""
@@ -100,9 +111,14 @@ class ItemService:
         """Return whether an item's floor-aware footprint occupies one cell."""
 
         floor_zs = item.params.get("floorZs")
-        occupies_floor = z in floor_zs if isinstance(floor_zs, list) else item.z == z
+        bounds = item_bounds(item)
+        occupies_floor = (
+            z in floor_zs if isinstance(floor_zs, list) else item.z <= z <= bounds[5]
+        )
         if not occupies_floor:
             return False
+        if any(getattr(item, field) is not None for field in ("endX", "endY", "endZ")):
+            return item.x <= x <= bounds[3] and item.y <= y <= bounds[4]
         return any(
             item.x + int(offset.get("x", 0)) == x
             and item.y + int(offset.get("y", 0)) == y
@@ -110,7 +126,9 @@ class ItemService:
         )
 
     def drop_carried_items_for_disconnect(
-        self, client: ClientConnection
+        self,
+        client: ClientConnection,
+        placement: Callable[[WorldItem], tuple[int, int, int]] | None = None,
     ) -> list[WorldItem]:
         """Drop all items carried by a disconnected client onto their last tile."""
 
@@ -118,9 +136,11 @@ class ItemService:
         for item in self.items.values():
             if item.carrierId == client.id:
                 item.carrierId = None
-                item.x = client.x
-                item.y = client.y
-                item.z = client.z
+                move_item(
+                    item,
+                    *(placement(item) if placement else (client.x, client.y, client.z)),
+                )
+                self.resting_positions[item.id] = (item.x, item.y, item.z)
                 item.updatedAt = self.now_ms()
                 item.updatedBy = "system"
                 item.updatedByName = "system"
@@ -161,6 +181,9 @@ class ItemService:
                 x=persisted.x,
                 y=persisted.y,
                 z=persisted.z,
+                endX=persisted.endX,
+                endY=persisted.endY,
+                endZ=persisted.endZ,
                 createdBy=persisted.createdBy,
                 createdByName=persisted.createdByName or persisted.createdBy,
                 updatedBy=persisted.updatedBy or persisted.createdBy,
@@ -207,12 +230,31 @@ class ItemService:
                 )
             elif item.carrierId is not None:
                 item.carrierId = None
-                if item.z not in (0, 40):
-                    item.z = 0
+                geometry = self.geometry or PlatformService(state_file=None)
+                bounds = item_bounds(item)
+                width, depth = bounds[3] - item.x + 1, bounds[4] - item.y + 1
+                if not geometry.covers_rectangle(
+                    item.x, item.y, bounds[3], bounds[4], item.z
+                ):
+                    for z in sorted(geometry.elevations):
+                        position = geometry.find_placement(
+                            width, depth, z, (item.x, item.y)
+                        )
+                        if position is not None:
+                            move_item(item, *position, z)
+                            break
+                    else:
+                        raise ValueError(
+                            "Carried item has no supported resting placement."
+                        )
+            validate_item_bounds(item)
             if item.id in loaded:
                 raise ValueError("Duplicate item id.")
             loaded[item.id] = item
         self.items = loaded
+        self.resting_positions = {
+            item.id: (item.x, item.y, item.z) for item in loaded.values()
+        }
 
     def load_piano_songs(self) -> None:
         """Load persisted piano song registry used by piano items."""
@@ -264,6 +306,9 @@ class ItemService:
                 x=item.x,
                 y=item.y,
                 z=item.z,
+                endX=item.endX,
+                endY=item.endY,
+                endZ=item.endZ,
                 createdBy=item.createdBy,
                 createdByName=item.createdByName,
                 updatedBy=item.updatedBy,
@@ -274,8 +319,19 @@ class ItemService:
                 params=item.params,
                 carrierId=item.carrierId,
             ).model_dump(exclude_none=True)
-            for item in self.items.values()
+            for live_item in self.items.values()
+            for item in [self._durable_item(live_item)]
         ]
+
+    def _durable_item(self, item: WorldItem) -> WorldItem:
+        """Save a supported resting position for carried items across restart."""
+
+        if not item.carrierId or self.drop_placement is None:
+            return item
+        durable = item.model_copy(deep=True)
+        move_item(durable, *self.drop_placement(item))
+        durable.carrierId = None
+        return durable
 
     def save_state(self) -> None:
         """Persist instance-only item data to configured state file."""

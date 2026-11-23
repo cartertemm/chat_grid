@@ -1,3 +1,5 @@
+import { type Platform } from './platformGeometry';
+
 export const GRID_SIZE = 41;
 export const HEARING_RADIUS = 20;
 export const MOVE_COOLDOWN_MS = 200;
@@ -11,6 +13,9 @@ export type WorldItem = {
   x: number;
   y: number;
   z: number;
+  endX?: number;
+  endY?: number;
+  endZ?: number;
   createdBy: string;
   updatedBy: string;
   createdAt: number;
@@ -119,6 +124,9 @@ export type GameMode =
   | 'worldBuilderRegionList'
   | 'worldBuilderRegionActions'
   | 'worldBuilderRegionEdit'
+  | 'worldBuilderPlatformList'
+  | 'worldBuilderPlatformActions'
+  | 'worldBuilderPlatformEdit'
   | 'worldBuilderAmbianceList'
   | 'worldBuilderAmbianceActions'
   | 'worldBuilderAmbianceEdit'
@@ -171,6 +179,7 @@ export type GameState = {
   peers: Map<string, PeerState>;
   items: Map<string, WorldItem>;
   structures: Map<string, WallStructure>;
+  platforms: Map<string, Platform>;
   ambiances: Map<string, AmbianceRegion>;
   regions: Map<string, NamedRegion>;
   elevatorItemId: string | null;
@@ -211,6 +220,7 @@ export function createInitialState(): GameState {
     peers: new Map(),
     items: new Map(),
     structures: new Map(),
+    platforms: new Map(),
     ambiances: new Map(),
     regions: new Map(),
     elevatorItemId: null,
@@ -272,17 +282,23 @@ export function isItemOnFloor(item: WorldItem, z: number): boolean {
   const floorZs = item.params.floorZs;
   return Array.isArray(floorZs)
     ? floorZs.some((floorZ) => Number(floorZ) === z)
-    : item.z === z;
+    : item.z <= z && z <= (item.endZ ?? item.z);
 }
 
 /** Returns whether an item footprint occupies a world cell on a floor. */
 export function itemOccupiesPosition(item: WorldItem, x: number, y: number, z: number): boolean {
   if (!isItemOnFloor(item, z)) return false;
+  if (hasItemBounds(item)) {
+    return item.x <= x && x <= (item.endX ?? item.x) && item.y <= y && y <= (item.endY ?? item.y);
+  }
   return item.occupiedOffsets.some((offset) => item.x + offset.x === x && item.y + offset.y === y);
 }
 
 /** Returns the occupied item cell nearest to a listener position. */
 export function getNearestItemPosition(item: WorldItem, x: number, y: number): { x: number; y: number } {
+  if (hasItemBounds(item)) {
+    return { x: Math.max(item.x, Math.min(item.endX ?? item.x, x)), y: Math.max(item.y, Math.min(item.endY ?? item.y, y)) };
+  }
   let nearest = { x: item.x, y: item.y };
   let nearestDistance = Infinity;
   for (const offset of item.occupiedOffsets) {
@@ -294,4 +310,14 @@ export function getNearestItemPosition(item: WorldItem, x: number, y: number): {
     }
   }
   return nearest;
+}
+
+/** Whether an instance supplies a compact rectangular footprint. */
+export function hasItemBounds(item: WorldItem): boolean {
+  return item.endX !== undefined || item.endY !== undefined || item.endZ !== undefined;
+}
+
+/** Inclusive bounds; old items retain their anchor as the endpoint. */
+export function itemBounds(item: WorldItem): { startX: number; startY: number; startZ: number; endX: number; endY: number; endZ: number } {
+  return { startX: item.x, startY: item.y, startZ: item.z, endX: item.endX ?? item.x, endY: item.endY ?? item.y, endZ: item.endZ ?? item.z };
 }

@@ -34,6 +34,16 @@ from .acoustic_zones import (
     floor_acoustic_zone_id,
 )
 from .region_service import RegionError, RegionService
+from .platform_service import PlatformError, PlatformService
+from .items.types.teleporter.validator import parse_destination
+from .models import (
+    PlatformAddPacket,
+    PlatformUpdatePacket,
+    PlatformDeletePacket,
+    PlatformUpsertPacket,
+    PlatformRemovePacket,
+    PlatformActionResultPacket,
+)
 from .ambiance_service import AmbianceError, AmbianceService
 from .client import ClientConnection, RateLimitName
 from .config import RateLimitsConfigSection, load_config
@@ -127,6 +137,7 @@ from .models import (
     UserLeftPacket,
     WelcomeReadyPacket,
     WelcomePacket,
+    WorldRestoredPacket,
     WallStructure,
     WorldSoundPacket,
     WorldItem,
@@ -236,6 +247,7 @@ class SignalingServer:
         max_items_per_user: int = 500,
         rate_limits: RateLimitsConfigSection | None = None,
         ambiance_sounds_dir: Path | None = None,
+        footstep_sounds_dir: Path | None = None,
     ):
         """Initialize runtime state, TLS context, and item service."""
 
@@ -278,7 +290,14 @@ class SignalingServer:
         self.world_store = WorldStateStore(state_file)
         state_file = self.world_store.active_state_file()
         self._world_gate = WorldMutationGate()
-        self.item_service = ItemService(state_file=state_file)
+        self.platform_service = PlatformService(
+            state_file=state_file.with_name("platforms.json") if state_file else None,
+            grid_size=self.grid_size,
+            sounds_dir=footstep_sounds_dir,
+        )
+        self.item_service = ItemService(
+            state_file=state_file, geometry=self.platform_service
+        )
         structure_state_file = (
             state_file.with_name("structures.json") if state_file else None
         )
@@ -286,11 +305,13 @@ class SignalingServer:
             state_file=structure_state_file,
             grid_size=self.grid_size,
             presets=structure_presets or {},
+            geometry=self.platform_service,
         )
         self.region_service = RegionService(
             state_file=state_file.with_name("regions.json") if state_file else None,
             grid_size=grid_size,
             floor_elevations=FLOOR_ELEVATIONS,
+            geometry=self.platform_service,
         )
         ambiance_state_file = (
             state_file.with_name("ambiances.json") if state_file else None
@@ -300,12 +321,14 @@ class SignalingServer:
             grid_size=self.grid_size,
             sounds_dir=ambiance_sounds_dir,
             floor_elevations=FLOOR_ELEVATIONS,
+            geometry=self.platform_service,
         )
         self.world_store.bind_services(
             self.item_service,
             self.structure_service,
             self.ambiance_service,
             self.region_service,
+            self.platform_service,
         )
         self.item_runtime = ItemRuntime(self)
         self.movement_tick_ms = MOVEMENT_TICK_MS
@@ -943,22 +966,21 @@ class SignalingServer:
     def _is_in_bounds(self, x: int, y: int) -> bool:
         """Check whether a coordinate is inside server-authoritative world bounds."""
 
-        return 0 <= x < self.grid_size and 0 <= y < self.grid_size
+        return any(
+            platform.startX <= x <= platform.endX
+            and platform.startY <= y <= platform.endY
+            for platform in self.platform_service.platforms.values()
+        )
 
-    @staticmethod
-    def _is_supported_floor(z: int) -> bool:
+    def _is_supported_floor(self, z: int) -> bool:
         """Return whether a height is a configured floor elevation."""
 
-        return z in FLOOR_ELEVATIONS
+        return z in self.platform_service.elevations
 
-    @staticmethod
-    def _floor_name(z: int) -> str:
-        """Return the configured user-facing floor name for an elevation."""
-
-        for floor in FLOOR_DEFINITIONS:
-            if int(floor["z"]) == z:
-                return str(floor["name"])
-        return f"z {z}"
+    def _floor_name(self, x: int, y: int, z: int) -> str:
+        """Name the standing surface at an item's specific landing."""
+        platform = self.platform_service.platform_at(x, y, z)
+        return platform.name if platform else f"z {z}"
 
     def _movement_window_index(self, now_ms: int) -> int:
         """Return current movement rate-limit window index for a server timestamp."""
@@ -1174,9 +1196,15 @@ class SignalingServer:
                 "gridSize": self.grid_size,
                 "movementTickMs": self.movement_tick_ms,
                 "movementMaxStepsPerTick": self.movement_max_steps_per_tick,
-                "floors": [dict(floor) for floor in FLOOR_DEFINITIONS],
+                "floors": [
+                    platform.model_dump(include={"id", "name", "z"})
+                    for platform in self.platform_service.platforms.values()
+                ],
                 "structurePresets": self.structure_service.preset_snapshot(),
                 "ambianceTypes": self.ambiance_service.ambiance_type_snapshot(),
+                "footstepSets": [
+                    entry.model_dump() for entry in self.platform_service.footstep_sets
+                ],
             },
             uiDefinitions=self._build_ui_definitions(client),
             serverInfo={
@@ -1223,16 +1251,13 @@ class SignalingServer:
             isinstance(saved_x, int)
             and isinstance(saved_y, int)
             and isinstance(saved_z, int)
-            and self._is_in_bounds(saved_x, saved_y)
-            and self._is_supported_floor(saved_z)
+            and self.platform_service.contains(saved_x, saved_y, saved_z)
         ):
             client.x = saved_x
             client.y = saved_y
             client.z = saved_z
         else:
-            client.x = random.randrange(self.grid_size)  # nosec B311
-            client.y = random.randrange(self.grid_size)  # nosec B311
-            client.z = 0
+            client.x, client.y, client.z = self.platform_service.spawn()
         client.facing_deg = (
             saved_facing_deg
             if isinstance(saved_facing_deg, int) and saved_facing_deg in FACING_DEGREES
@@ -1255,6 +1280,14 @@ class SignalingServer:
         client.world_ready = True
         self._persist_client_last_seen(client, force=True)
         self.clients[client.websocket] = client
+        # A platform can disappear between welcome and joining the active roster.
+        if not self.platform_service.contains(client.x, client.y, client.z):
+            client.x, client.y, client.z = self.platform_service.spawn()
+            self._persist_client_position(client, force=True)
+            await self.delivery.send(
+                client, WorldRestoredPacket(type="world_restored", **public_world(self))
+            )
+            await self.delivery.send(client, client_position_packet(client))
         LOGGER.info(
             "client authenticated id=%s user_id=%s username=%s total=%d",
             client.id,
@@ -1770,6 +1803,200 @@ class SignalingServer:
                 ambianceId=ambiance.id,
             ),
         )
+        return True
+
+    def _validate_platform_world(
+        self, geometry: PlatformService, *, relocate_players: bool
+    ) -> None:
+        """Reject geometry changes that remove required standing or authored support."""
+        if not relocate_players and not geometry.contains(
+            *self.platform_service.spawn()
+        ):
+            raise PlatformError("The world's spawn needs platform support.")
+        for client in self.clients.values():
+            if not relocate_players and not geometry.contains(
+                client.x, client.y, client.z
+            ):
+                raise PlatformError(
+                    f"{client.nickname} is standing on the affected platform."
+                )
+        for item in self.items.values():
+            end_x = getattr(item, "endX", None)
+            end_y = getattr(item, "endY", None)
+            width = (item.x if end_x is None else end_x) - item.x + 1
+            depth = (item.y if end_y is None else end_y) - item.y + 1
+            if item.carrierId:
+                rest_x, rest_y, rest_z = self.item_service.resting_positions.get(
+                    item.id, (item.x, item.y, item.z)
+                )
+                if not geometry.covers_rectangle(
+                    rest_x, rest_y, rest_x + width - 1, rest_y + depth - 1, rest_z
+                ):
+                    raise PlatformError(
+                        f"{item.title}'s saved resting location needs platform support."
+                    )
+                continue
+            if not geometry.covers_rectangle(
+                item.x, item.y, item.x + width - 1, item.y + depth - 1, item.z
+            ):
+                raise PlatformError(f"{item.title} needs platform support.")
+            if item.type == "elevator":
+                if any(
+                    not geometry.contains(item.x, item.y, int(z))
+                    for z in item.params.get("floorZs", [0, 40])
+                ):
+                    raise PlatformError(
+                        f"{item.title} needs a platform at each landing."
+                    )
+            if item.type == "teleporter":
+                destination = parse_destination(
+                    item.params.get("destination", "0, 0, 0")
+                )
+                if not geometry.contains(*destination):
+                    raise PlatformError(f"{item.title}'s destination needs a platform.")
+        staged = StructureService(
+            state_file=None,
+            grid_size=self.grid_size,
+            presets=self.structure_service.presets,
+            geometry=geometry,
+        )
+        staged.restore_state(self.structure_service.dump_state())
+        for region in self.region_service.regions.values():
+            if region.floorZ not in geometry.elevations:
+                raise PlatformError(
+                    f"{region.name} needs an elevation with a platform."
+                )
+        for ambiance in self.ambiance_service.ambiances.values():
+            if ambiance.floorZ not in geometry.elevations:
+                raise PlatformError(
+                    f"{ambiance.name} needs an elevation with a platform."
+                )
+        if self.item_runtime.teleport.active_client_ids:
+            raise PlatformError(
+                "Wait for active teleports to finish before editing platforms."
+            )
+
+    async def _handle_platform_packet(
+        self, client: ClientConnection, packet: ClientPacket
+    ) -> bool:
+        """Apply permission-gated geometry changes after complete support validation."""
+        if not isinstance(
+            packet, (PlatformAddPacket, PlatformUpdatePacket, PlatformDeletePacket)
+        ):
+            return False
+        if not self._client_has_permission(client, "world.platform.edit"):
+            await self.delivery.send(
+                client,
+                PlatformActionResultPacket(
+                    type="platform_action_result",
+                    requestId=packet.requestId,
+                    ok=False,
+                    message="Not authorized to edit platforms.",
+                ),
+            )
+            return True
+        if not self._consume_rate_limit(client, "item_changes"):
+            await self.delivery.send(
+                client,
+                PlatformActionResultPacket(
+                    type="platform_action_result",
+                    requestId=packet.requestId,
+                    ok=False,
+                    message=ITEM_CHANGE_RATE_LIMIT_MESSAGE,
+                ),
+            )
+            return True
+        try:
+            values = packet.model_dump(
+                exclude_none=True, exclude={"type", "platformId", "requestId"}
+            )
+            platform_id = getattr(packet, "platformId", None)
+            removed = isinstance(packet, PlatformDeletePacket)
+            previous = self.platform_service.platforms.get(platform_id or "")
+            relocate_players = previous is not None and (
+                removed or values.get("z", previous.z) == previous.z
+            )
+            platform = self.platform_service.mutate(
+                platform_id,
+                values,
+                delete=removed,
+                validate_world=lambda geometry: self._validate_platform_world(
+                    geometry, relocate_players=relocate_players
+                ),
+            )
+            relocated = []
+            removed_support = previous is not None and (
+                removed
+                or platform.z != previous.z
+                or platform.startX > previous.startX
+                or platform.startY > previous.startY
+                or platform.endX < previous.endX
+                or platform.endY < previous.endY
+            )
+            retained_players = [
+                occupant
+                for occupant in self.clients.values()
+                if removed_support
+                and previous is not None
+                and previous.contains(occupant.x, occupant.y, occupant.z)
+                and self.platform_service.contains(occupant.x, occupant.y, occupant.z)
+            ]
+            if previous is not None and relocate_players:
+                destination = self.platform_service.spawn()
+                for occupant in self.clients.values():
+                    if (
+                        occupant.elevator_id is None
+                        and previous.contains(occupant.x, occupant.y, occupant.z)
+                        and (
+                            removed
+                            or not platform.contains(occupant.x, occupant.y, occupant.z)
+                        )
+                    ):
+                        occupant.x, occupant.y, occupant.z = destination
+                        self._persist_client_position(occupant, force=True)
+                        relocated.append(occupant)
+            self._request_state_save()
+            broadcast = (
+                PlatformRemovePacket(type="platform_remove", platformId=platform.id)
+                if removed
+                else PlatformUpsertPacket(type="platform_upsert", platform=platform)
+            )
+            await self.delivery.broadcast(broadcast)
+            # A client may cancel list travel after this geometry change even
+            # when its authoritative standing cell still exists.
+            for occupant in retained_players:
+                await self.delivery.send(occupant, client_position_packet(occupant))
+            for occupant in relocated:
+                await self.delivery.broadcast(client_position_packet(occupant))
+                await self.item_runtime.sync_carried_items(occupant)
+            message = (
+                f"Deleted {platform.name}."
+                if removed
+                else f"Added {platform.name}."
+                if platform_id is None
+                else ""
+            )
+            await self.delivery.send(
+                client,
+                PlatformActionResultPacket(
+                    type="platform_action_result",
+                    requestId=packet.requestId,
+                    ok=True,
+                    message=message,
+                    platformId=platform.id,
+                ),
+            )
+        except (ValueError, TypeError) as exc:
+            await self.delivery.send(
+                client,
+                PlatformActionResultPacket(
+                    type="platform_action_result",
+                    requestId=packet.requestId,
+                    ok=False,
+                    message=str(exc),
+                    platformId=getattr(packet, "platformId", None),
+                ),
+            )
         return True
 
     async def _handle_region_packet(
@@ -2472,7 +2699,15 @@ class SignalingServer:
             )
             return
 
-        checkpoint = isinstance(packet, CheckpointActionPacket)
+        checkpoint = isinstance(
+            packet,
+            (
+                CheckpointActionPacket,
+                PlatformAddPacket,
+                PlatformUpdatePacket,
+                PlatformDeletePacket,
+            ),
+        )
         if isinstance(packet, CheckpointActionPacket):
             rejection = None
             if not self._can_manage_checkpoint(client, packet.action):
@@ -2578,6 +2813,9 @@ class SignalingServer:
         if await self._handle_region_packet(client, packet):
             return
 
+        if await self._handle_platform_packet(client, packet):
+            return
+
         if await self._handle_ambiance_packet(client, packet):
             return
 
@@ -2591,7 +2829,9 @@ class SignalingServer:
                     client_position_packet(client),
                 )
                 return
-            if not self._is_in_bounds(packet.x, packet.y) or packet.z != client.z:
+            if packet.z != client.z or not self.platform_service.valid_step(
+                client.x, client.y, client.z, packet.x, packet.y
+            ):
                 PACKET_LOGGER.warning(
                     "out-of-bounds position ignored id=%s x=%d y=%d grid_size=%d",
                     client.id,
@@ -2685,7 +2925,9 @@ class SignalingServer:
                     client_position_packet(client),
                 )
                 return
-            if not self._is_in_bounds(packet.x, packet.y) or packet.z != client.z:
+            if packet.z != client.z or not self.platform_service.contains(
+                packet.x, packet.y, packet.z
+            ):
                 PACKET_LOGGER.warning(
                     "out-of-bounds teleport ignored id=%s x=%d y=%d grid_size=%d",
                     client.id,

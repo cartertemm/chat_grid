@@ -56,7 +56,7 @@ describe('door controls', () => {
       send: vi.fn(), blip: vi.fn(), textState: { nicknameInput: '', cursorPos: 0 },
       applyTextInputEdit: vi.fn(), setReplaceTextOnNextType: vi.fn(), setMode: vi.fn(),
       getWall: () => edited, choose, confirm: vi.fn(), status, normal: vi.fn(),
-      focusGrid: vi.fn(), gridSize: () => 41, cue: vi.fn(),
+      focusGrid: vi.fn(), hasPlatform: (x, y) => x >= 0 && y >= 0 && x < 41 && y < 41, cue: vi.fn(),
       keypadSound: vi.fn().mockResolvedValue(undefined),
     });
     controls.edit(edited, vi.fn());
@@ -115,7 +115,7 @@ describe('door controls', () => {
       status,
       normal: vi.fn(),
       focusGrid: vi.fn(),
-      gridSize: () => 41,
+      hasPlatform: (x, y) => x >= 0 && y >= 0 && x < 41 && y < 41,
       cue: vi.fn(),
       keypadSound,
     });

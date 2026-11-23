@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Literal, TypeAlias
+from typing import Annotated, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, StrictInt
+
+COORDINATE_LIMIT = 1_000_000
+WorldCoordinate: TypeAlias = Annotated[
+    StrictInt, Field(ge=-COORDINATE_LIMIT, le=COORDINATE_LIMIT)
+]
 
 FacingDeg: TypeAlias = Literal[0, 45, 90, 135, 180, 225, 270, 315]
 
@@ -385,6 +390,53 @@ class RegionDeletePacket(BasePacket):
     regionId: str
 
 
+class PlatformAddPacket(BasePacket):
+    """Create a flat platform from validated inclusive corners."""
+
+    type: Literal["platform_add"]
+    requestId: str | None = Field(default=None, max_length=128)
+    name: str = Field(default="Platform", min_length=1, max_length=100)
+    startX: WorldCoordinate
+    startY: WorldCoordinate
+    endX: WorldCoordinate
+    endY: WorldCoordinate
+    z: WorldCoordinate
+    footstepSet: str = Field(
+        default="default",
+        min_length=1,
+        max_length=100,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$",
+    )
+
+
+class PlatformUpdatePacket(BasePacket):
+    """Replace supplied properties on an existing flat platform."""
+
+    type: Literal["platform_update"]
+    requestId: str | None = Field(default=None, max_length=128)
+    platformId: str
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    startX: WorldCoordinate | None = None
+    startY: WorldCoordinate | None = None
+    endX: WorldCoordinate | None = None
+    endY: WorldCoordinate | None = None
+    z: WorldCoordinate | None = None
+    footstepSet: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=100,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$",
+    )
+
+
+class PlatformDeletePacket(BasePacket):
+    """Remove one platform after validating dependent world objects."""
+
+    type: Literal["platform_delete"]
+    requestId: str | None = Field(default=None, max_length=128)
+    platformId: str
+
+
 class CheckpointActionPacket(BasePacket):
     """Request durable capture, paged browsing, preview, or confirmed restore."""
 
@@ -452,6 +504,9 @@ ClientPacket = (
     | RegionSlidePacket
     | RegionDeletePacket
     | CheckpointActionPacket
+    | PlatformAddPacket
+    | PlatformUpdatePacket
+    | PlatformDeletePacket
 )
 
 
@@ -475,6 +530,7 @@ class WelcomePacket(BasePacket):
     structures: list[dict] | None = None
     ambiances: list[dict] | None = None
     regions: list[dict] | None = None
+    platforms: list[dict] | None = None
     worldConfig: dict | None = None
     uiDefinitions: dict | None = None
     serverInfo: dict | None = None
@@ -594,6 +650,9 @@ class WorldItem(BaseModel):
     x: int
     y: int
     z: int
+    endX: StrictInt | None = None
+    endY: StrictInt | None = None
+    endZ: StrictInt | None = None
     createdBy: str
     createdByName: str
     updatedBy: str
@@ -620,6 +679,9 @@ class PersistedWorldItem(BaseModel):
     x: int
     y: int
     z: int = 0
+    endX: StrictInt | None = None
+    endY: StrictInt | None = None
+    endZ: StrictInt | None = None
     createdBy: str
     createdByName: str | None = None
     updatedBy: str | None = None
@@ -658,6 +720,64 @@ class WallDoor(BaseModel):
     revision: StrictInt = Field(default=0, ge=0)
 
 
+class FootstepSet(BaseModel):
+    """One installed footstep directory and its client-safe sample URLs."""
+
+    id: str
+    title: str
+    urls: list[str]
+
+
+class Platform(BaseModel):
+    """One named flat standing surface with inclusive integer coordinates."""
+
+    id: str = Field(min_length=1, max_length=128)
+    name: str = Field(min_length=1, max_length=100)
+    startX: WorldCoordinate
+    startY: WorldCoordinate
+    endX: WorldCoordinate
+    endY: WorldCoordinate
+    z: WorldCoordinate
+    footstepSet: str = Field(
+        default="default",
+        min_length=1,
+        max_length=100,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$",
+    )
+
+    def contains(self, x: int, y: int, z: int) -> bool:
+        """Return whether the cell lies on this platform, including its edges."""
+        return (
+            self.z == z
+            and self.startX <= x <= self.endX
+            and self.startY <= y <= self.endY
+        )
+
+
+class PlatformUpsertPacket(BasePacket):
+    """Publish complete platform geometry."""
+
+    type: Literal["platform_upsert"]
+    platform: Platform
+
+
+class PlatformRemovePacket(BasePacket):
+    """Publish removal of one platform."""
+
+    type: Literal["platform_remove"]
+    platformId: str
+
+
+class PlatformActionResultPacket(BasePacket):
+    """Acknowledge a platform mutation with compact status feedback."""
+
+    type: Literal["platform_action_result"]
+    requestId: str | None = None
+    ok: bool
+    message: str
+    platformId: str | None = None
+
+
 class WallStructure(BaseModel):
     """One editable wall run stored separately from world items."""
 
@@ -684,10 +804,10 @@ class AmbianceRegion(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     soundId: str = Field(min_length=1, max_length=128)
     floorZ: StrictInt
-    startX: StrictInt = Field(ge=0)
-    startY: StrictInt = Field(ge=0)
-    endX: StrictInt = Field(ge=0)
-    endY: StrictInt = Field(ge=0)
+    startX: WorldCoordinate
+    startY: WorldCoordinate
+    endX: WorldCoordinate
+    endY: WorldCoordinate
     volume: StrictInt = Field(default=25, ge=0, le=100)
     fadeDistance: FiniteFloat = Field(default=5.0, ge=0.0, le=100.0)
 
@@ -698,10 +818,10 @@ class NamedRegion(BaseModel):
     id: str = Field(min_length=1, max_length=128)
     name: str = Field(min_length=1, max_length=100)
     floorZ: StrictInt
-    startX: StrictInt = Field(ge=0)
-    startY: StrictInt = Field(ge=0)
-    endX: StrictInt = Field(ge=0)
-    endY: StrictInt = Field(ge=0)
+    startX: WorldCoordinate
+    startY: WorldCoordinate
+    endX: WorldCoordinate
+    endY: WorldCoordinate
 
 
 class AmbianceType(BaseModel):
@@ -1010,3 +1130,4 @@ class WorldRestoredPacket(BasePacket):
     structures: list[dict]
     regions: list[dict]
     ambiances: list[dict]
+    platforms: list[dict] = Field(default_factory=list)

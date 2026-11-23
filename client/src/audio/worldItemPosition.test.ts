@@ -23,6 +23,11 @@ function item(overrides: Partial<WorldItem> = {}): WorldItem {
 }
 
 describe('resolveWorldItemSourcePosition', () => {
+  it('places a wide tall widget at the closest point of its volume', () => {
+    const widget = item({ type: 'widget', params: {}, endX: 30, endY: 20, endZ: 40 });
+    expect(resolveWorldItemSourcePosition(widget, 40, 32, 16)).toEqual({ x: 30, y: 16, z: 40 });
+    expect(resolveWorldItemSourcePosition(widget, 60, 11, 16)).toEqual({ x: 11, y: 16, z: 40 });
+  });
   it('anchors a floor-aware source to the listener landing', () => {
     expect(resolveWorldItemSourcePosition(item(), 40)).toEqual({ x: 10, y: 12, z: 40 });
   });

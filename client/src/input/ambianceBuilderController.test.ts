@@ -89,7 +89,7 @@ describe('World Builder ambiance controls', () => {
     for (let step = 0; step < 2; step++) controller.handleAmbianceActions('ArrowDown', 'ArrowDown');
     controller.handleAmbianceActions('Space', ' ');
     expect(updateStatus).toHaveBeenLastCalledWith(
-      'Move the west edge by one square with Left or Right. Type: number. Editable.',
+      'Move the west edge by one square with Left or Right. Type: number. Range: -1000000 to 1000000 step 1. Editable.',
     );
     for (let step = 0; step < 6; step++) controller.handleAmbianceActions('ArrowDown', 'ArrowDown');
     controller.handleAmbianceActions('Space', ' ');

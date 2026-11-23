@@ -6,6 +6,8 @@ The server accepts an item_duplicate request naming a source item on the caller'
 
 ## World Item (server-authoritative)
 
+The optional integer fields `endX`, `endY` and `endZ` give compact inclusive per-instance bounds from `x`, `y` and `z`. An omitted endpoint equals its matching starting coordinate, preserving old point items. Widgets can edit these fields through `item_update.params` using the existing property editor. The server extracts them into top-level fields, validates order, span and platform support, and commits the whole change atomically. Every current non-widget type retains its fixed catalog footprint. Fields persist through the shared live-world/checkpoint item serializer. Carrying saves use a supported resting location so a restart cannot strand a wide item at a narrow edge.
+
 ```json
 {
   "id": "string",
@@ -93,7 +95,7 @@ Metadata hides dependent controls with `visibleWhen: {"emitSound": "!"}`. Facing
 }
 ```
 
-- `destination`: text containing exactly three integers, normalized to `x, y, z`; maximum 100 characters. The server checks horizontal grid bounds and configured floor elevation before use.
+- `destination`: text containing exactly three integers, normalized to `x, y, z`; maximum 100 characters. The server checks for a platform at the complete destination when editing and before use.
 - The normal `title` field provides its editable name. Its own `x`, `y`, and `z` locate the device; they are separate from its destination.
 - Capabilities: `editable`, `deletable`, `usable`. Cooldown: 1000 ms. No persistent per-item runtime state or custom client behavior is required.
 

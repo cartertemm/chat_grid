@@ -8,6 +8,9 @@ LABEL = "widget"
 TOOLTIP = "A basic item. Make it a beacon or whatever you want."
 EDITABLE_PROPERTIES: tuple[str, ...] = (
     "title",
+    "endX",
+    "endY",
+    "endZ",
     "enabled",
     "directional",
     "facing",
@@ -62,6 +65,15 @@ PARAM_KEYS: tuple[str, ...] = (
 EFFECT_OPTIONS = EMIT_EFFECT_OPTIONS
 
 PROPERTY_METADATA: dict[str, dict[str, object]] = {
+    **{
+        field: {
+            "label": f"End {axis}",
+            "valueType": "number",
+            "tooltip": f"Inclusive ending {axis} coordinate, at or beyond the item's starting {axis}. Each dimension can span up to 1000 cells. The base must fit on platforms.",
+            "range": {"min": -1000000, "max": 1000000, "step": 1},
+        }
+        for field, axis in (("endX", "X"), ("endY", "Y"), ("endZ", "Z"))
+    },
     "title": {
         "valueType": "text",
         "tooltip": "Display name spoken and shown for this item.",

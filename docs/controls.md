@@ -206,6 +206,14 @@ Applies to effect select, user/item list modes, item selection, item property li
 - `Escape`: Exit help viewer
 - No first-letter navigation in this mode
 
+### Platforms (World Builder)
+
+- Choose **Platforms** to browse every elevation or **Add platform** to enter a new flat rectangle. Creating a platform opens an unsaved draft at your position. Set its Name, Start X/Y, End X/Y and Elevation, then choose **Create platform**. This permits coordinate entry for disconnected islands and new elevations.
+- Use the shared property controls. `Up`/`Down` browse rows, `Left`/`Right` adjust coordinates by one, and page keys adjust by ten. `Enter` opens text entry, where `Up`/`Down` step the value. `Space` reads the selected property's tooltip and range. Signed integer coordinates range from -1,000,000 to 1,000,000.
+- Existing platform edits are validated and saved by the server. Only the accepted property value is announced. Reversed corners are normalized. Platforms may touch, and platforms at different elevations may share X/Y coordinates. Same-height overlaps are rejected. Disconnected platforms are allowed.
+- **Footsteps** selects the platform's walking sounds, starting with **Default**. Use Left/Right to change the sound set or Enter to open the shared options list. Space reads help. After the server accepts a change, only the selected sound set's name is announced.
+- **Delete platform** uses the shared confirmation controls. Deleting or shrinking a platform moves anyone whose square loses support to `0, 0, 0` if it is supported, or to the lowest X/Y corner of the first remaining platform. People on retained squares stay in place. Placed items and required landings can block the change, and at least one platform must remain. A rejected edit announces the server's reason. `Escape` returns to the previous menu or cancels text entry.
+
 ### Ambiance editor (World Builder)
 
 - `Add ambiance` / `Edit ambiances`: Create at your current square or select a region on this floor. Both open the same editor, with Type first.

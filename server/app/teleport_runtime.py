@@ -38,6 +38,7 @@ class TeleportRuntimeCallbacks:
     sync_carried_items: Callable[[ClientConnection], Awaitable[None]]
     now_ms: Callable[[], int]
     is_client_connected: Callable[[ClientConnection], bool] = lambda _client: True
+    is_valid_destination: Callable[[int, int, int], bool] | None = None
 
 
 @dataclass
@@ -91,6 +92,11 @@ class TeleportRuntime:
             return "Teleport destination is out of bounds."
         if not self.callbacks.is_supported_floor(z):
             return "Teleport destination is not a configured floor."
+        if (
+            self.callbacks.is_valid_destination is not None
+            and not self.callbacks.is_valid_destination(x, y, z)
+        ):
+            return "Teleport destination needs a platform."
         return None
 
     async def begin(

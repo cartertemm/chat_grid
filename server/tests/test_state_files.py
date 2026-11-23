@@ -18,6 +18,7 @@ STATE_FILES = [
     "ambiances.json",
     "regions.json",
     "piano_songs.json",
+    "platforms.json",
 ]
 # A save cut off partway through, well-formed JSON of the wrong shape, and the
 # right shape holding an invalid entry.
@@ -79,7 +80,9 @@ def set_aside_copies(directory: Path, name: str) -> list[Path]:
     return sorted(directory.glob(f"{name}.unreadable-*"))
 
 
-@pytest.mark.parametrize("name", STATE_FILES)
+@pytest.mark.parametrize(
+    "name", [name for name in STATE_FILES if name != "platforms.json"]
+)
 @pytest.mark.parametrize("variant", list(UNREADABLE_CONTENTS))
 def test_unreadable_state_file_is_kept_when_the_world_is_next_saved(
     make_grid: Callable[[], World], tmp_path: Path, name: str, variant: str
@@ -139,7 +142,9 @@ def test_interrupted_save_leaves_every_previous_file_intact(
     )
 
 
-@pytest.mark.parametrize("name", STATE_FILES)
+@pytest.mark.parametrize(
+    "name", [name for name in STATE_FILES if name != "platforms.json"]
+)
 def test_unreadable_file_that_cannot_be_set_aside_is_never_saved_over(
     make_grid: Callable[[], World],
     tmp_path: Path,
@@ -222,7 +227,15 @@ def test_symlinked_state_file_keeps_its_link(
     volume = tmp_path / "volume"
     volume.mkdir()
     for name in STATE_FILES:
-        (volume / name).write_text("[]" if name != "piano_songs.json" else "{}")
+        if name == "platforms.json":
+            from app.platform_service import PlatformService
+            import json
+
+            (volume / name).write_text(
+                json.dumps(PlatformService(state_file=None).dump_state())
+            )
+        else:
+            (volume / name).write_text("[]" if name != "piano_songs.json" else "{}")
         (tmp_path / name).symlink_to(volume / name)
 
     world = make_grid()

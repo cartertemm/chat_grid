@@ -18,11 +18,13 @@ class PublicWorld(TypedDict):
     structures: list[dict]
     regions: list[dict]
     ambiances: list[dict]
+    platforms: list[dict]
 
 
 def public_world(server: SignalingServer) -> PublicWorld:
     """Use the welcome packet's public representation for every full refresh."""
     return PublicWorld(
+        platforms=server.platform_service.dump_state(),
         items=[
             server.item_runtime.outbound_item(item).model_dump(exclude_none=True)
             for item in server.items.values()
@@ -52,10 +54,8 @@ async def reconcile_world_restore(server: SignalingServer) -> None:
             prior = (client.x, client.y, client.z, client.elevator_id)
             client.elevator_id = None
             # Walls occupy edges. A valid tile remains a valid standing position.
-            client.x = max(0, min(client.x, server.grid_size - 1))
-            client.y = max(0, min(client.y, server.grid_size - 1))
-            if not server._is_supported_floor(client.z):
-                client.z = 0
+            if not server.platform_service.contains(client.x, client.y, client.z):
+                client.x, client.y, client.z = server.platform_service.spawn()
             if (client.x, client.y, client.z, client.elevator_id) != prior:
                 server._persist_client_position(client, force=True)
                 corrected.append(client)

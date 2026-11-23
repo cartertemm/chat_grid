@@ -16,13 +16,14 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 import re
 import uuid
 
 from .ambiance_service import AmbianceService
 from .item_service import ItemService
 from .region_service import RegionService
+from .platform_service import PlatformService
 from .state_files import _sync_directory, write_json_atomic
 from .structure_service import StructureService
 
@@ -136,6 +137,23 @@ class WorldStateStore:
                 ) from exc
             self.active_directory = directory
             self.using_generation = True
+            try:
+                manifest = json.loads(
+                    (directory / "manifest.json").read_text(encoding="utf-8")
+                )
+                if (
+                    "platforms" in manifest.get("checksums", {})
+                    and not (directory / "platforms.json").is_file()
+                ):
+                    raise CheckpointError(
+                        "The active world platform dataset is missing."
+                    )
+            except CheckpointError:
+                raise
+            except (OSError, ValueError, AttributeError) as exc:
+                raise CheckpointError(
+                    "The active world manifest is unreadable."
+                ) from exc
 
     @staticmethod
     def _identifier(value: object) -> str:
@@ -168,6 +186,7 @@ class WorldStateStore:
         structures: StructureService,
         ambiances: AmbianceService,
         regions: RegionService,
+        platforms: PlatformService | None = None,
     ) -> None:
         """Register the same codecs used by each service's ordinary persistence."""
 
@@ -176,20 +195,30 @@ class WorldStateStore:
             "gridSize": structures.grid_size,
             "floors": sorted(regions.floor_elevations),
         }
-        item_copy = ItemService()
+        platform_copy = (
+            PlatformService(state_file=None, grid_size=structures.grid_size)
+            if platforms
+            else None
+        )
+        item_copy = ItemService(geometry=platform_copy)
         structure_copy = StructureService(
-            state_file=None, grid_size=structures.grid_size, presets=structures.presets
+            state_file=None,
+            grid_size=structures.grid_size,
+            presets=structures.presets,
+            geometry=platform_copy,
         )
         ambiance_copy = AmbianceService(
             state_file=None,
             grid_size=ambiances.grid_size,
             sounds_dir=ambiances.sounds_dir,
             floor_elevations=ambiances.floor_elevations,
+            geometry=platform_copy,
         )
         region_copy = RegionService(
             state_file=None,
             grid_size=regions.grid_size,
             floor_elevations=regions.floor_elevations,
+            geometry=platform_copy,
         )
         services: tuple[tuple[str, DurableService, DurableService], ...] = (
             ("items", items, item_copy),
@@ -197,6 +226,10 @@ class WorldStateStore:
             ("ambiances", ambiances, ambiance_copy),
             ("regions", regions, region_copy),
         )
+        if platforms is not None and platform_copy is not None:
+            self._register_service(
+                "platforms", "platforms.json", platforms, platform_copy
+            )
         for name, service, staged in services:
             filename = (
                 self.original_state_file.name
@@ -232,6 +265,14 @@ class WorldStateStore:
             ):
                 raise CheckpointError(
                     "The active generation belongs to a different world configuration."
+                )
+            if (
+                platforms is not None
+                and not (self.active_directory / "platforms.json").exists()
+                and "platforms" not in manifest.get("checksums", {})
+            ):
+                write_json_atomic(
+                    self.active_directory / "platforms.json", platforms.dump_state()
                 )
             if any(
                 not dataset.writable()
@@ -300,10 +341,42 @@ class WorldStateStore:
                 "Checkpoint datasets do not match this world version."
             )
         try:
-            return {
-                name: self.datasets[name].normalize(value)
-                for name, value in data.items()
+            ordered = sorted(data, key=lambda name: name != "platforms")
+            normalized = {
+                name: self.datasets[name].normalize(data[name]) for name in ordered
             }
+            if "platforms" in normalized:
+                geometry = PlatformService(state_file=None)
+                geometry.restore_state(normalized["platforms"])
+                for item in cast(list[dict], normalized.get("items", [])):
+                    end_x = item.get("endX", item["x"])
+                    end_y = item.get("endY", item["y"])
+                    if not geometry.covers_rectangle(
+                        item["x"], item["y"], end_x, end_y, item["z"]
+                    ):
+                        raise ValueError("Checkpoint item has no platform support.")
+                    if item["type"] == "elevator" and any(
+                        not geometry.contains(item["x"], item["y"], z)
+                        for z in item.get("params", {}).get("floorZs", [0, 40])
+                    ):
+                        raise ValueError("Checkpoint elevator landing has no platform.")
+                    if item["type"] == "teleporter":
+                        from .items.types.teleporter.validator import parse_destination
+
+                        if not geometry.contains(
+                            *parse_destination(
+                                item.get("params", {}).get("destination", "0, 0, 0")
+                            )
+                        ):
+                            raise ValueError(
+                                "Checkpoint teleporter destination has no platform."
+                            )
+                for ambiance in cast(list[dict], normalized.get("ambiances", [])):
+                    if ambiance["floorZ"] not in geometry.elevations:
+                        raise ValueError(
+                            "Checkpoint ambiance has no platform elevation."
+                        )
+            return normalized
         except (ValueError, TypeError, KeyError) as exc:
             raise CheckpointError("Checkpoint contains invalid world data.") from exc
 
@@ -403,11 +476,13 @@ class WorldStateStore:
                 raise CheckpointError(
                     "Checkpoint belongs to a different world configuration."
                 )
+            saved_names = set(manifest.get("checksums", {}))
             data = {
                 name: json.loads(
                     (directory / dataset.filename).read_text(encoding="utf-8")
                 )
                 for name, dataset in self.datasets.items()
+                if name in saved_names
             }
             if manifest.get("checksums") != {
                 name: _digest(value) for name, value in data.items()
@@ -419,6 +494,10 @@ class WorldStateStore:
                 for name, value in data.items()
             }:
                 raise CheckpointError("Checkpoint counts do not match its datasets.")
+            if "platforms" in self.datasets and "platforms" not in data:
+                data["platforms"] = PlatformService(
+                    state_file=None, grid_size=int(self.world_config["gridSize"])
+                ).dump_state()
             return manifest, self._validate(data)
         except (OSError, ValueError, KeyError, TypeError) as exc:
             raise CheckpointError(
@@ -439,6 +518,7 @@ class WorldStateStore:
                     *(
                         directory / dataset.filename
                         for dataset in self.datasets.values()
+                        if (directory / dataset.filename).is_file()
                     ),
                 ]
                 signature = tuple(
@@ -535,7 +615,17 @@ class WorldStateStore:
         if self.generations is None:
             raise CheckpointError("Persistent world storage is unavailable.")
         generation = uuid.uuid4().hex
-        directory = self._publish(self.generations, generation, candidate, manifest)
+        generation_manifest = {
+            **manifest,
+            "counts": {
+                name: len(value) if isinstance(value, (list, dict)) else 1
+                for name, value in candidate.items()
+            },
+            "checksums": {name: _digest(value) for name, value in candidate.items()},
+        }
+        directory = self._publish(
+            self.generations, generation, candidate, generation_manifest
+        )
         pointer_path = self.generations / "current.json"
         durable = True
         try:
