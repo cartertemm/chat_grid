@@ -284,7 +284,7 @@ Metadata hides dependent controls with `visibleWhen: {"emitSound": "!"}`. Facing
 - The full standard emitter control set is editable. It emits from the shaft object's anchor on configured stops.
 - `doorOpenSeconds` accepts `0..300` with default 5. `speed` accepts `0.1..1000` Z units per second with default 10. Both use tenths. The open dwell begins after opening audio finishes. Travel begins after closing audio finishes and takes the absolute elevation difference divided by speed.
 - Door transitions play `/sounds/elevator_open.ogg` and `/sounds/elevator_close.ogg` spatially. Entry and exit are rejected during either transition.
-- `/sounds/elevator_up.ogg` and `/sounds/elevator_down.ogg` reflect the next known departure direction. A multi-stop car with no selected destination has no direction cue yet.
+- Each opening plays `/sounds/elevator_up.ogg` (single ding) or `/sounds/elevator_down.ogg` (double ding) immediately before the door clip. The next queued stop determines the direction. With no request, the single ding plays except at the highest configured stop, where the double ding plays.
 - `/sounds/elevator_inside.ogg` loops from a randomized offset for passengers and is spatially audible to nearby users only through a fully open door.
 - Elevator runtime timers are not resumed after a server restart. A loaded elevator returns to a closed, idle state at its last completed floor.
 - `requestedZs` stores distinct pending destinations in acceptance order. Transient requests clear on restart. A rider choosing a stop adds it through `elevator_select_floor`.

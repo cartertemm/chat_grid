@@ -14,7 +14,6 @@ from ....item_geometry import move_item
 from ....runtime_tasks import cancel_and_join
 from ....acoustic_zones import (
     client_position_packet,
-    elevator_acoustic_zone_id,
     floor_acoustic_zone_id,
 )
 from ....client import ClientConnection
@@ -140,7 +139,6 @@ class ElevatorRuntime:
         self._touch(item)
         await self.callbacks.broadcast_item(item)
         if state == "idle":
-            await self.broadcast_direction_sound(item, current_z)
             self._restart_task(item.id)
         name = self.callbacks.floor_name(item.x, item.y, destination_z)
         await self._send_result(client, f"Requested {name}.", item.id)
@@ -238,7 +236,6 @@ class ElevatorRuntime:
             self._set_moving(item, target_z)
             self._touch(item)
             await self.callbacks.broadcast_item(item)
-            await self.broadcast_direction_sound(item, current_z)
             self._restart_task(item.id)
             await self._send_result(client, f"You call {item.title}.", item.id)
             return
@@ -296,9 +293,7 @@ class ElevatorRuntime:
                     item.params["doorOpen"] = False
                     self._touch(item)
                     await self.callbacks.broadcast_item(item)
-                    await self._broadcast_sound(
-                        item, target_z, "/sounds/elevator_open.ogg"
-                    )
+                    await self._broadcast_opening_sounds(item, target_z)
                     continue
                 if state in {"opening", "arriving"}:
                     await asyncio.sleep(ELEVATOR_DOOR_OPEN_SOUND_SECONDS)
@@ -338,7 +333,6 @@ class ElevatorRuntime:
                     await self.callbacks.broadcast_item(item)
                     if next_z is None:
                         return
-                    await self.broadcast_direction_sound(item, current_z)
                     continue
                 return
         except asyncio.CancelledError:
@@ -387,39 +381,18 @@ class ElevatorRuntime:
             last_z = travel_z
             await self._broadcast_travel_position(item, travel_z)
 
-    async def broadcast_direction_sound(self, item: WorldItem, current_z: int) -> None:
-        """Announce departure once per listener in their cabin or landing zone."""
+    async def _broadcast_opening_sounds(self, item: WorldItem, current_z: int) -> None:
+        """Start the direction chime and door clip together at this landing."""
 
-        next_z = item.params.get("targetZ")
-        if not isinstance(next_z, int) or next_z == current_z:
-            return
-        sound = (
-            "/sounds/elevator_up.ogg"
-            if next_z > current_z
-            else "/sounds/elevator_down.ogg"
+        next_z = self._next_destination(item, current_z, consume=False)
+        going_down = (
+            next_z < current_z
+            if next_z is not None
+            else current_z == max(self._floor_elevations(item))
         )
-        landing_sound = ItemUseSoundPacket(
-            type="item_use_sound",
-            itemId=item.id,
-            sound=sound,
-            x=item.x,
-            y=item.y,
-            z=current_z,
-            acousticZoneId=floor_acoustic_zone_id(current_z),
-            range=self.callbacks.get_emit_range(item),
-        )
-        cabin_sound = landing_sound.model_copy(
-            update={"acousticZoneId": elevator_acoustic_zone_id(item.id)}
-        )
-        await asyncio.gather(
-            *(
-                self.delivery.send(
-                    listener,
-                    cabin_sound if listener.elevator_id == item.id else landing_sound,
-                )
-                for listener in tuple(self.callbacks.iter_clients())
-            )
-        )
+        chime = "/sounds/elevator_down.ogg" if going_down else "/sounds/elevator_up.ogg"
+        await self._broadcast_sound(item, current_z, chime)
+        await self._broadcast_sound(item, current_z, "/sounds/elevator_open.ogg")
 
     async def _begin_opening(self, item: WorldItem, current_z: int) -> None:
         """Enter the non-traversable opening phase and start its sound."""
@@ -428,7 +401,7 @@ class ElevatorRuntime:
         item.params["doorOpen"] = False
         self._touch(item)
         await self.callbacks.broadcast_item(item)
-        await self._broadcast_sound(item, current_z, "/sounds/elevator_open.ogg")
+        await self._broadcast_opening_sounds(item, current_z)
         self._restart_task(item.id)
 
     async def _move_occupants(self, item: WorldItem, destination_z: int) -> None:
@@ -613,15 +586,19 @@ class ElevatorRuntime:
         return sorted(int(z) for z in floors if isinstance(z, int))
 
     @staticmethod
-    def _next_destination(item: WorldItem, current_z: int) -> int | None:
-        """Consume the first configured request outside the current landing."""
-        queue = list(item.params.get("requestedZs", []))
+    def _next_destination(
+        item: WorldItem, current_z: int, *, consume: bool = True
+    ) -> int | None:
+        """Find the next requested stop, advancing the queue only for departure."""
+        queue = item.params.get("requestedZs", [])
         floors = ElevatorRuntime._floor_elevations(item)
-        while queue:
-            destination = queue.pop(0)
-            item.params["requestedZs"] = queue
+        for index, destination in enumerate(queue):
             if destination in floors and destination != current_z:
+                if consume:
+                    item.params["requestedZs"] = queue[index + 1 :]
                 return destination
+        if consume:
+            item.params["requestedZs"] = []
         return None
 
     @staticmethod

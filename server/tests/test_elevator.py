@@ -360,6 +360,7 @@ async def test_elevator_opens_then_second_use_enters(
     door_packets = transport.packets_of_type(observer, ItemUseSoundPacket)
     door_sounds = [packet.sound for packet in door_packets]
     assert door_sounds == [
+        "/sounds/elevator_up.ogg",
         "/sounds/elevator_open.ogg",
     ]
     assert all(packet.acousticZoneId == "floor:0" for packet in door_packets)
@@ -540,6 +541,7 @@ async def test_elevator_arrival_moves_rider_and_carried_item(
     assert arrival.message == "Elevator arrives on Second floor. The door opens."
     elevator_sounds = transport.packets_of_type(observer, ItemUseSoundPacket)
     assert [packet.sound for packet in elevator_sounds] == [
+        "/sounds/elevator_down.ogg",
         "/sounds/elevator_open.ogg",
         "/sounds/elevator_close.ogg",
     ]
@@ -548,38 +550,35 @@ async def test_elevator_arrival_moves_rider_and_carried_item(
     assert (ELEVATOR_DOOR_CLOSE_SOUND_SECONDS, "closing") in sleeps
     close_index = sleeps.index((ELEVATOR_DOOR_CLOSE_SOUND_SECONDS, "closing"))
     assert all(state == "moving" for _, state in sleeps[close_index + 1 :])
-    opening_sound = elevator_sounds[0]
-    assert (opening_sound.x, opening_sound.y, opening_sound.z) == (10, 10, 40)
-    assert opening_sound.acousticZoneId == "floor:40"
+    for sound in elevator_sounds:
+        assert (sound.x, sound.y, sound.z) == (10, 10, 40)
+        assert sound.acousticZoneId == "floor:40"
 
 
 @pytest.mark.asyncio
-async def test_elevator_departure_direction_reaches_cabin_and_landing_once(
-    make_world,
-) -> None:
-    """A closed car's departure cue reaches riders without leaking its zone."""
+@pytest.mark.parametrize(
+    ("queue", "direction"),
+    [([], "up"), ([20, 999, -10, 40], "down"), ([40, -10], "up")],
+)
+async def test_middle_stop_opening_chime(world, monkeypatch, queue, direction) -> None:
+    """Hear the next trip or the default chime without consuming a request."""
+    client = world.join("tester", x=10, y=10, z=20)
+    elevator = world.server.item_service.default_item(client, "elevator")
+    elevator.params.update(floorZs=[-10, 20, 40], currentZ=20, requestedZs=queue.copy())
+    rider = world.join("rider", x=10, y=10, z=20, elevator_id=elevator.id)
+    runtime = world.server.item_runtime.elevator
+    monkeypatch.setattr(runtime, "_restart_task", lambda _: None)
 
-    world = make_world(grid_size=41)
-    server, transport = world.server, world.transport
-    observer = world.join("observer", x=40, y=40)
-    client = world.join("tester", x=10, y=10, z=40, client_id="u1")
-    elevator = server.item_service.default_item(client, "elevator")
-    rider = world.join("rider", x=10, y=10, z=0, elevator_id=elevator.id)
+    await runtime.use(client, elevator)
 
-    elevator.params["targetZ"] = 40
-    elevator.params["state"] = "moving"
-    elevator.params["doorOpen"] = False
-    await server.item_runtime.elevator.broadcast_direction_sound(elevator, 0)
-
-    landing_sounds = transport.packets_of_type(observer, ItemUseSoundPacket)
-    assert len(landing_sounds) == 1
-    assert landing_sounds[0].sound == "/sounds/elevator_up.ogg"
-    assert landing_sounds[0].z == 0
-    assert landing_sounds[0].acousticZoneId == "floor:0"
-    cabin_sounds = transport.packets_of_type(rider, ItemUseSoundPacket)
-    assert len(cabin_sounds) == 1
-    assert cabin_sounds[0].sound == "/sounds/elevator_up.ogg"
-    assert cabin_sounds[0].acousticZoneId == f"elevator:{elevator.id}"
+    for listener in (client, rider):
+        sounds = world.transport.packets_of_type(listener, ItemUseSoundPacket)
+        assert [packet.sound for packet in sounds] == [
+            f"/sounds/elevator_{direction}.ogg",
+            "/sounds/elevator_open.ogg",
+        ]
+        assert all(packet.acousticZoneId == "floor:20" for packet in sounds)
+    assert elevator.params["requestedZs"] == queue
 
 
 @pytest.mark.asyncio
@@ -590,7 +589,7 @@ async def test_elevator_waits_for_closing_sound_before_travel(
     """The runtime must not begin car movement until the closing clip finishes."""
 
     world = make_world(grid_size=41)
-    server = world.server
+    server, transport = world.server, world.transport
     client = world.join("tester", x=10, y=10, z=0, client_id="u1")
     elevator = server.item_service.default_item(client, "elevator")
     elevator.params.update(
@@ -622,6 +621,7 @@ async def test_elevator_waits_for_closing_sound_before_travel(
 
     assert travel_started is True
     assert elevator.params["state"] == "moving"
+    assert transport.packets_of_type(client, ItemUseSoundPacket) == []
 
 
 @pytest.mark.asyncio
@@ -690,6 +690,7 @@ async def test_stopped_rider_waits_for_reopened_door_before_exiting(
         for packet in transport.packets_of_type(observer, ItemUseSoundPacket)
     ]
     assert door_sounds == [
+        "/sounds/elevator_down.ogg",
         "/sounds/elevator_open.ogg",
     ]
 
