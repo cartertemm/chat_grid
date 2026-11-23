@@ -518,8 +518,11 @@ class UserLeftPacket(BasePacket):
 
 
 class BroadcastPositionPacket(BasePacket):
+    """Publish authoritative placement and the account behind a voice session."""
+
     type: Literal["update_position"]
     id: str
+    userId: str | None = None
     x: int
     y: int
     z: int

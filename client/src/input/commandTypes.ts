@@ -30,7 +30,12 @@ export function formatCommandShortcut(shortcut: string): string {
     .join('+');
 }
 
+export function opensActionMenu(code: string, shiftKey: boolean): boolean {
+  return code === 'ContextMenu' || (shiftKey && (code === 'F10' || code === 'KeyK'));
+}
+
 /** Formats a palette/menu label as `Name: Key`. */
 export function formatCommandMenuLabel(command: Pick<CommandDescriptor, 'label' | 'shortcut'>): string {
+  if (!command.shortcut) return command.label;
   return `${command.label}: ${formatCommandShortcut(command.shortcut)}`;
 }

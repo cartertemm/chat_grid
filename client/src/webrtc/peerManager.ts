@@ -13,6 +13,7 @@ import type { RemoteUser } from '../network/protocol';
 
 export type PeerRuntime = SpatialPeerRuntime & {
   id: string;
+  userId?: string | null;
   acousticZoneId: string;
   remoteStream?: MediaStream;
 };
@@ -35,6 +36,7 @@ export class PeerManager {
   private recoveryFailureReported = false;
   private recovering = false;
   private listenerZ = 0;
+  private voiceMuteResolver: (peer: PeerRuntime) => boolean = () => false;
   private subscriptionResolver: (peer: PeerRuntime) => boolean = (peer) => peer.z === this.listenerZ;
 
   constructor(
@@ -139,9 +141,9 @@ export class PeerManager {
   /** Ensure a grid participant exists before attaching their LiveKit track. */
   ensurePeer(targetId: string, userData: Partial<RemoteUser>): PeerRuntime {
     const existing = this.peers.get(targetId);
-    if (existing) return existing;
-    const peer: PeerRuntime = {
+    const peer: PeerRuntime = existing ?? {
       id: targetId,
+      userId: userData.userId,
       nickname: userData.nickname ?? 'user...',
       x: userData.x ?? 20,
       y: userData.y ?? 20,
@@ -150,9 +152,11 @@ export class PeerManager {
       acousticGain: 0,
       listenGain: 1,
     };
+    if (userData.userId !== undefined) peer.userId = userData.userId;
+    peer.voiceMuted = this.voiceMuteResolver(peer);
     this.peers.set(targetId, peer);
     const pending = this.pendingRemoteStreams.get(targetId);
-    if (pending) {
+    if (pending && peer.userId !== undefined) {
       this.pendingRemoteStreams.delete(targetId);
       if (this.shouldSubscribe(peer)) {
         this.attachRemoteStream(peer, pending);
@@ -293,6 +297,22 @@ export class PeerManager {
     return peer && Number.isFinite(peer.listenGain) ? Math.max(0, peer.listenGain as number) : 1;
   }
 
+  /** Resolve personal voice mute independently from world subscriptions and volume. */
+  setVoiceMuteResolver(resolver: (peer: PeerRuntime) => boolean): void {
+    this.voiceMuteResolver = resolver;
+    this.refreshVoiceMutes();
+  }
+
+  refreshVoiceMutes(): void {
+    for (const peer of this.peers.values()) {
+      peer.voiceMuted = this.voiceMuteResolver(peer);
+      if (peer.voiceMuted && peer.gain) {
+        peer.gain.gain.cancelScheduledValues(0);
+        peer.gain.gain.value = 0;
+      }
+    }
+  }
+
   async setOutputDevice(deviceId: string): Promise<void> {
     this.outputDeviceId = deviceId;
     await this.audio.setOutputDevice(deviceId).catch(() => {
@@ -324,7 +344,7 @@ export class PeerManager {
   private setRemoteStream(participantId: string, stream: MediaStream): void {
     const peer = this.peers.get(participantId);
     if (peer && !this.shouldSubscribe(peer)) return;
-    if (!peer) {
+    if (!peer || peer.userId === undefined) {
       this.pendingRemoteStreams.set(participantId, stream);
       return;
     }

@@ -758,6 +758,7 @@ async def test_auth_login_defers_activation_until_welcome_ready(
         "chat_message",
     ]
     presence = transport.last_packet_of_type(observer, BroadcastPositionPacket)
+    assert presence.userId == client.user_id
     assert (presence.id, presence.x, presence.y, presence.z) == (
         client.id,
         client.x,

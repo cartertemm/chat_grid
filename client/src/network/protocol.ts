@@ -285,6 +285,7 @@ export const livekitTokenSchema = z.object({
 export const updatePositionSchema = z.object({
   type: z.literal('update_position'),
   id: z.string(),
+  userId: z.string().nullable().optional(),
   x: z.number().int(),
   y: z.number().int(),
   z: z.number().int(),

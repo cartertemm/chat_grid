@@ -32,6 +32,7 @@ def client_position_packet(client: ClientConnection) -> BroadcastPositionPacket:
     return BroadcastPositionPacket(
         type="update_position",
         id=client.id,
+        userId=client.user_id,
         x=client.x,
         y=client.y,
         z=client.z,

@@ -1,5 +1,5 @@
 import type { GameMode } from '../state/gameState';
-import type { ModeInput } from './commandTypes';
+import { opensActionMenu, type ModeInput } from './commandTypes';
 
 type KeyboardControllerDeps = {
   dom: {
@@ -37,6 +37,7 @@ export function setupKeyboardInputHandlers(deps: KeyboardControllerDeps): void {
   }
 
   function codeFromKey(key: string, location: number): string | null {
+    if (key === 'ContextMenu' || key === 'Apps' || key === 'F10') return key === 'Apps' ? 'ContextMenu' : key;
     if (key === 'Escape' || key === 'Esc') return 'Escape';
     if (key === 'Enter' || key === 'Return') return 'Enter';
     if (key === 'Backspace') return 'Backspace';
@@ -146,7 +147,7 @@ export function setupKeyboardInputHandlers(deps: KeyboardControllerDeps): void {
 
     const opensCommandPalette =
       deps.canOpenCommandPaletteInMode(deps.state.mode) &&
-      ((code === 'KeyK' && event.shiftKey) || code === 'ContextMenu' || (code === 'F10' && event.shiftKey));
+      opensActionMenu(code, event.shiftKey);
     if (opensCommandPalette) {
       deps.openCommandPalette();
       deps.state.keysPressed[code] = true;

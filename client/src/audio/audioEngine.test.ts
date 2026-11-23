@@ -121,6 +121,29 @@ describe('AudioEngine output device', () => {
 });
 
 describe('AudioEngine spatial preferences', () => {
+  it('gates only muted voice and restores the current listen volume on unmute', async () => {
+    vi.stubGlobal('window', { AudioContext: FakeAudioContext });
+    const audio = new AudioEngine();
+    await audio.ensureContext();
+    const makePeer = (voiceMuted: boolean): SpatialPeerRuntime => ({
+      nickname: 'speaker', x: 0, y: 0, z: 0, listenGain: 0.75, acousticGain: 1, voiceMuted,
+      gain: audio.context!.createGain(),
+    });
+    const muted = makePeer(true);
+    const audible = makePeer(false);
+    const listener = { x: 0, y: 0, z: 0 };
+    audio.updateSpatialAudio([muted, audible], listener);
+    expect(muted.gain!.gain.value).toBe(0);
+    expect(audible.gain!.gain.value).toBeGreaterThan(0);
+    muted.listenGain = 0.5;
+    audio.updateSpatialAudio([muted], listener);
+    expect(muted.gain!.gain.value).toBe(0);
+    muted.voiceMuted = false;
+    audio.updateSpatialAudio([muted], listener);
+    expect(muted.gain!.gain.value).toBeCloseTo(audible.gain!.gain.value * 0.5 / 0.75);
+    expect(muted.listenGain).toBe(0.5);
+  });
+
   it('remembers standard-mode turns without rotating audio, then applies them in HRTF', async () => {
     vi.stubGlobal('window', { AudioContext: FakeAudioContext });
     const audio = new AudioEngine();

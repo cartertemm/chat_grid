@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ConnectionState, RoomEvent, type LocalAudioTrack } from 'livekit-client';
+import { ConnectionState, RoomEvent, Track, type LocalAudioTrack } from 'livekit-client';
 import type { AudioEngine } from '../audio/audioEngine';
 import { PeerManager } from './peerManager';
 
 const livekit = vi.hoisted(() => {
   class MockRoom {
     static instances: MockRoom[] = [];
-    handlers = new Map<string, () => void>();
+    handlers = new Map<string, (...args: unknown[]) => void>();
     state = 'disconnected';
     remoteParticipants = new Map<string, unknown>();
     localParticipant = { publishTrack: vi.fn(async (_track: LocalAudioTrack): Promise<void> => undefined) };
@@ -17,8 +17,8 @@ const livekit = vi.hoisted(() => {
     });
     removeAllListeners = vi.fn(() => { this.handlers.clear(); });
     constructor() { MockRoom.instances.push(this); }
-    on(event: string, handler: () => void) { this.handlers.set(event, handler); }
-    emit(event: string) { this.handlers.get(event)?.(); }
+    on(event: string, handler: (...args: unknown[]) => void) { this.handlers.set(event, handler); }
+    emit(event: string, ...args: unknown[]) { this.handlers.get(event)?.(...args); }
   }
   return { MockRoom };
 });
@@ -42,12 +42,13 @@ function setup() {
   let running = true;
   const status = vi.fn();
   const requestToken = vi.fn();
-  const audio = { cleanupPeerAudio: vi.fn() } as unknown as AudioEngine;
+  const attachRemoteStream = vi.fn(async () => undefined);
+  const audio = { cleanupPeerAudio: vi.fn(), isVoiceLayerEnabled: () => true, attachRemoteStream } as unknown as AudioEngine;
   const manager = new PeerManager(audio, status, {
     isSessionRunning: () => running,
     requestToken,
   });
-  return { manager, status, requestToken, stopGrid: () => { running = false; } };
+  return { manager, status, requestToken, attachRemoteStream, stopGrid: () => { running = false; } };
 }
 
 function latestRoom() {
@@ -58,9 +59,51 @@ beforeEach(() => {
   vi.useFakeTimers();
   livekit.MockRoom.instances = [];
 });
-afterEach(() => { vi.useRealTimers(); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe('LiveKit voice recovery', () => {
+  it.each([false, true])('waits for signaling identity when voice arrives first (placeholder %s)', async (placeholder) => {
+    vi.stubGlobal('MediaStream', class { constructor(public tracks: unknown[]) {} });
+    const { manager, attachRemoteStream } = setup();
+    manager.setVoiceMuteResolver((peer) => peer.userId === 'muted-account');
+    if (placeholder) manager.ensurePeer('new-session', { nickname: 'user...' });
+    await manager.connectToRoom('wss://voice.test', 'token');
+    latestRoom().emit(
+      RoomEvent.TrackSubscribed,
+      { kind: Track.Kind.Audio, mediaStreamTrack: {} },
+      { setSubscribed: vi.fn() },
+      { identity: 'new-session' },
+    );
+    expect(attachRemoteStream).not.toHaveBeenCalled();
+    if (!placeholder) manager.ensurePeer('new-session', { nickname: 'user...' });
+    expect(attachRemoteStream).not.toHaveBeenCalled();
+    const peer = manager.ensurePeer('new-session', { userId: 'muted-account' });
+    expect(peer.voiceMuted).toBe(true);
+    expect(attachRemoteStream).toHaveBeenCalledTimes(1);
+    expect(attachRemoteStream).toHaveBeenCalledWith(expect.objectContaining({ voiceMuted: true }), expect.anything());
+  });
+
+  it('applies mute before a peer can attach audio and retains listen gain through refresh', () => {
+    const { manager } = setup();
+    let muted = true;
+    manager.setVoiceMuteResolver((peer) => muted && peer.userId === 'speaker');
+    const peer = manager.ensurePeer('session-1', { userId: 'speaker' });
+    expect(peer.voiceMuted).toBe(true);
+    manager.setPeerListenGain(peer.id, 0.4);
+    const gain = { value: 0.4, cancelScheduledValues: vi.fn() };
+    peer.gain = { gain } as unknown as GainNode;
+    manager.refreshVoiceMutes();
+    expect(gain.value).toBe(0);
+    expect(manager.getPeerListenGain(peer.id)).toBe(0.4);
+    muted = false;
+    manager.refreshVoiceMutes();
+    expect(peer.voiceMuted).toBe(false);
+    expect(manager.getPeerListenGain(peer.id)).toBe(0.4);
+    manager.ensurePeer('session-2', {});
+    muted = true;
+    expect(manager.ensurePeer('session-2', { userId: 'speaker' }).voiceMuted).toBe(true);
+  });
+
   it('publishes the first microphone captured during an SDK reconnect', async () => {
     const { manager, status } = setup();
     await manager.connectToRoom('wss://voice.test', 'token');

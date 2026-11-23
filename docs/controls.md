@@ -33,6 +33,7 @@ Press Space on a property row or in its option list to hear help for the current
 ### Users, Nickname, Chat
 - `L`: Locate nearest user
 - `Shift+L`: List users alphabetically with current presence; `Enter` teleports to selected user; `ArrowLeft`/`ArrowRight` adjust selected user volume
+- In the user list, press `Applications` or `Shift+F10` to open actions for the selected person. You can also right-click their displayed row or use **Actions** on the touch dock. **Mute voice for me** silences only their incoming voice. Choose **Unmute voice for me** to hear them again at their selected volume. Muted rows announce “voice muted for you.” Signed-in listeners' choices are remembered for this grid and account on this device.
 - `U`: Speak connected users
 - `N`: Edit nickname
 - `/`: Start chat
