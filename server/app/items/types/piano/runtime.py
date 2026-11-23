@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable
 import time
 from typing import Literal, Protocol, TypedDict
 
+from ....runtime_tasks import cancel_and_join
 from ....client import ClientConnection, RateLimitName
 from ....delivery import Delivery
 from ....item_service import ItemService
@@ -962,7 +964,7 @@ class PianoRuntime:
             if session.get("ownerClientId") == client.id:
                 await self._finalize_piano_recording(item_id)
 
-    async def shutdown(self) -> None:
+    def shutdown(self) -> Awaitable[None]:
         """Cancel and await all active piano background tasks."""
 
         tasks = list(self.playback_tasks_by_item.values())
@@ -971,10 +973,7 @@ class PianoRuntime:
             for session in self.recording_state_by_item.values()
             if isinstance((task := session.get("autoStopTask")), asyncio.Task)
         )
-        for task in tasks:
-            task.cancel()
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
         self.playback_tasks_by_item.clear()
         self.recording_state_by_item.clear()
         self.active_keys_by_client.clear()
+        return cancel_and_join(tasks)

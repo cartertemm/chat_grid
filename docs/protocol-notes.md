@@ -226,3 +226,10 @@ This is a behavior guide for packet semantics beyond raw schemas.
 A wall carries its doors as offsets from the run start. Welcome and structure upserts include public door state, configuration and revisions. The server persists private lock verification data with the structures dataset. Public packets omit credential material.
 
 Clients request explicit add, edit, remove, open, close, lock and unlock operations with `door_action`. The server validates the wall, edge, player position, permissions and current state. A `door_action_result` can prompt the caller for an exclusive keypad session. Each digit is sent privately as `keypad_digit`; cancellation uses `keypad_cancel`. The server owns both the keypad inactivity limit and any automatic relock deadline. Enabling keypad mode arms the lock as part of the same server update. Unlocking changes lock state independently of movement and closing. A door movement sound carries the wall orientation so listeners on either side hear it at the doorway; intervening walls still affect transmission. Use ordinary structure upserts to update crossing, rendering and acoustic state for everyone.
+
+
+### Manual world checkpoints
+
+A client sends `checkpoint_action` with `capture`, `list`, `preview`, or `restore`. The server checks the caller's permissions and returns a private `checkpoint_result`. Listings and previews expose summary counts and warnings. Restore requires both view and restore permissions, the checkpoint ID, and the world revision from preview. The server rejects a stale comparison and returns a refreshed preview.
+
+After durable publication, `world_restored` replaces each connected client's items, structures (including doors), ambiances, and regions using the public welcome representation. Position updates reconcile affected players. Door PIN verification data and recorded song data stay server-side.

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable
 import logging
 import re
 from typing import Protocol
 from urllib.parse import urlsplit
 
+from ....runtime_tasks import cancel_and_join
 from ....item_service import ItemService
 from ....models import WorldItem
 from ....network_security import open_validated_public_url
@@ -62,14 +64,12 @@ class RadioRuntime:
         if self._task is None or self._task.done():
             self._task = asyncio.create_task(self._run_radio_metadata_loop())
 
-    async def shutdown(self) -> None:
+    def shutdown(self) -> Awaitable[None]:
         """Cancel and await background metadata polling."""
 
-        if self._task is None:
-            return
-        self._task.cancel()
-        await asyncio.gather(self._task, return_exceptions=True)
+        task = self._task
         self._task = None
+        return cancel_and_join([task] if task is not None else [])
 
     @staticmethod
     def _fetch_stream_metadata(stream_url: str) -> tuple[str, str]:

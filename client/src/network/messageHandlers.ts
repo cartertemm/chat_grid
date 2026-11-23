@@ -83,6 +83,8 @@ type MessageHandlerDeps = {
   handleAdminActionResult: (message: Extract<IncomingMessage, { type: 'admin_action_result' }>) => void;
   handleItemTransferTargets: (message: Extract<IncomingMessage, { type: 'item_transfer_targets' }>) => void;
   handleItemHandTargets: (message: Extract<IncomingMessage, { type: 'item_hand_targets' }>) => void;
+  handleCheckpointResult?: (message: Extract<IncomingMessage, { type: 'checkpoint_result' }>) => void;
+  handleWorldRestored?: () => void;
   handleDoorResult?: (message: Extract<IncomingMessage, {type: 'door_action_result'}>) => void;
   handleStructureActionResult: (message: Extract<IncomingMessage, { type: 'structure_action_result' }>) => void;
   handleRegionActionResult?: (message: Extract<IncomingMessage, { type: 'region_action_result' }>) => void;
@@ -121,6 +123,24 @@ export function createOnMessageHandler(deps: MessageHandlerDeps): (message: Inco
         break;
       case 'item_hand_targets':
         deps.handleItemHandTargets(message);
+        break;
+      case 'checkpoint_result':
+        deps.handleCheckpointResult?.(message);
+        break;
+      case 'world_restored':
+        deps.handleWorldRestored?.();
+        deps.state.items = new Map(message.items.map((item) => [item.id, item]));
+        deps.state.structures = new Map(message.structures.map((wall) => [wall.id, wall]));
+        deps.state.ambiances = new Map(message.ambiances.map((ambiance) => [ambiance.id, ambiance]));
+        deps.state.regions = new Map(message.regions.map((region) => [region.id, region]));
+        deps.state.selectedItemId = null;
+        deps.state.itemPropertyKeys = [];
+        deps.state.itemPropertyIndex = 0;
+        deps.state.elevatorItemId = null;
+        deps.state.mode = 'normal';
+        deps.refreshStructureGeometry();
+        deps.refreshAcousticModel();
+        await deps.refreshAudioSubscriptions(true);
         break;
       case 'door_action_result':
         deps.handleDoorResult?.(message);

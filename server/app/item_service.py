@@ -137,75 +137,82 @@ class ItemService:
             if text is None:
                 return
             raw = json.loads(text)
-            if not isinstance(raw, list):
-                raise ValueError("Item state must be a list.")
-            loaded: dict[str, WorldItem] = {}
-            for entry in raw:
-                persisted = PersistedWorldItem.model_validate(entry)
-                item_def = get_item_definition(persisted.type)
-                item = WorldItem(
-                    id=persisted.id,
-                    type=persisted.type,
-                    title=persisted.title,
-                    x=persisted.x,
-                    y=persisted.y,
-                    z=persisted.z,
-                    createdBy=persisted.createdBy,
-                    createdByName=persisted.createdByName or persisted.createdBy,
-                    updatedBy=persisted.updatedBy or persisted.createdBy,
-                    updatedByName=persisted.updatedByName
-                    or persisted.updatedBy
-                    or persisted.createdBy,
-                    createdAt=persisted.createdAt,
-                    updatedAt=persisted.updatedAt,
-                    version=persisted.version,
-                    capabilities=list(item_def.capabilities),
-                    useSound=item_def.use_sound,
-                    emitSound=item_def.emit_sound,
-                    params={**deepcopy(item_def.default_params), **persisted.params},
-                    carrierId=persisted.carrierId,
-                    occupiedOffsets=[
-                        {"x": offset_x, "y": offset_y}
-                        for offset_x, offset_y in item_def.occupied_offsets
-                    ],
-                )
-                if item.type == "elevator":
-                    for timing_key in ("doorOpenSeconds", "travelSeconds"):
-                        item.params.setdefault(
-                            timing_key, item_def.default_params[timing_key]
-                        )
-                    configured_floor_zs = item.params.get("floorZs", [0, 40])
-                    floor_zs = {
-                        int(floor_z)
-                        for floor_z in configured_floor_zs
-                        if isinstance(floor_z, int)
-                    }
-                    current_z = int(item.params.get("currentZ", 0))
-                    if current_z not in floor_zs:
-                        current_z = min(floor_zs, default=0)
-                    item.z = 0
-                    item.params.update(
-                        {
-                            "currentZ": current_z,
-                            "targetZ": None,
-                            "queuedZ": None,
-                            "departOnCloseZ": None,
-                            "state": "idle",
-                            "doorOpen": False,
-                        }
-                    )
-                elif item.carrierId is not None:
-                    item.carrierId = None
-                    if item.z not in (0, 40):
-                        item.z = 0
-                loaded[item.id] = item
-            self.items = loaded
+            self.restore_state(raw)
             LOGGER.info(
                 "loaded %d persisted items from %s", len(self.items), self.state_file
             )
         except Exception as exc:
             if not set_aside_unreadable(self.state_file, exc):
                 self.state_file = None
+
+    def restore_state(self, raw: object) -> None:
+        """Validate and hydrate a complete item dataset before replacing it."""
+
+        if not isinstance(raw, list):
+            raise ValueError("Item state must be a list.")
+        loaded: dict[str, WorldItem] = {}
+        for entry in raw:
+            persisted = PersistedWorldItem.model_validate(entry)
+            item_def = get_item_definition(persisted.type)
+            item = WorldItem(
+                id=persisted.id,
+                type=persisted.type,
+                title=persisted.title,
+                x=persisted.x,
+                y=persisted.y,
+                z=persisted.z,
+                createdBy=persisted.createdBy,
+                createdByName=persisted.createdByName or persisted.createdBy,
+                updatedBy=persisted.updatedBy or persisted.createdBy,
+                updatedByName=persisted.updatedByName
+                or persisted.updatedBy
+                or persisted.createdBy,
+                createdAt=persisted.createdAt,
+                updatedAt=persisted.updatedAt,
+                version=persisted.version,
+                capabilities=list(item_def.capabilities),
+                useSound=item_def.use_sound,
+                emitSound=item_def.emit_sound,
+                params={**deepcopy(item_def.default_params), **persisted.params},
+                carrierId=persisted.carrierId,
+                occupiedOffsets=[
+                    {"x": offset_x, "y": offset_y}
+                    for offset_x, offset_y in item_def.occupied_offsets
+                ],
+            )
+            if item.type == "elevator":
+                for timing_key in ("doorOpenSeconds", "travelSeconds"):
+                    item.params.setdefault(
+                        timing_key, item_def.default_params[timing_key]
+                    )
+                configured_floor_zs = item.params.get("floorZs", [0, 40])
+                floor_zs = {
+                    int(floor_z)
+                    for floor_z in configured_floor_zs
+                    if isinstance(floor_z, int)
+                }
+                current_z = int(item.params.get("currentZ", 0))
+                if current_z not in floor_zs:
+                    current_z = min(floor_zs, default=0)
+                item.z = 0
+                item.params.update(
+                    {
+                        "currentZ": current_z,
+                        "targetZ": None,
+                        "queuedZ": None,
+                        "departOnCloseZ": None,
+                        "state": "idle",
+                        "doorOpen": False,
+                    }
+                )
+            elif item.carrierId is not None:
+                item.carrierId = None
+                if item.z not in (0, 40):
+                    item.z = 0
+            if item.id in loaded:
+                raise ValueError("Duplicate item id.")
+            loaded[item.id] = item
+        self.items = loaded
 
     def load_piano_songs(self) -> None:
         """Load persisted piano song registry used by piano items."""
@@ -217,16 +224,7 @@ class ItemService:
             if text is None:
                 return
             raw = json.loads(text)
-            if not isinstance(raw, dict):
-                raise ValueError("Piano song state must be an object.")
-            loaded: dict[str, dict] = {}
-            for song_id, payload in raw.items():
-                if not isinstance(song_id, str) or not song_id.strip():
-                    raise ValueError("Piano song ids must be non-empty text.")
-                if not isinstance(payload, dict):
-                    raise ValueError(f"Piano song {song_id} must be an object.")
-                loaded[song_id] = payload
-            self.piano_songs = loaded
+            self.restore_piano_songs(raw)
             LOGGER.info(
                 "loaded %d persisted piano songs from %s",
                 len(self.piano_songs),
@@ -236,32 +234,56 @@ class ItemService:
             if not set_aside_unreadable(self.piano_songs_file, exc):
                 self.piano_songs_file = None
 
+    def restore_piano_songs(self, raw: object) -> None:
+        """Validate a complete durable piano song registry before replacing it."""
+
+        if not isinstance(raw, dict):
+            raise ValueError("Piano song state must be an object.")
+        loaded: dict[str, dict] = {}
+        for song_id, payload in raw.items():
+            if not isinstance(song_id, str) or not song_id.strip():
+                raise ValueError("Piano song ids must be non-empty text.")
+            if not isinstance(payload, dict):
+                raise ValueError(f"Piano song {song_id} must be an object.")
+            loaded[song_id] = payload
+        self.piano_songs = loaded
+
+    def dump_piano_songs(self) -> dict[str, dict]:
+        """Encode the song registry shared by live saves and checkpoints."""
+
+        return deepcopy(self.piano_songs)
+
+    def dump_state(self) -> list[dict]:
+        """Encode the durable item dataset shared by live saves and checkpoints."""
+
+        return [
+            PersistedWorldItem(
+                id=item.id,
+                type=item.type,
+                title=item.title,
+                x=item.x,
+                y=item.y,
+                z=item.z,
+                createdBy=item.createdBy,
+                createdByName=item.createdByName,
+                updatedBy=item.updatedBy,
+                updatedByName=item.updatedByName,
+                createdAt=item.createdAt,
+                updatedAt=item.updatedAt,
+                version=item.version,
+                params=item.params,
+                carrierId=item.carrierId,
+            ).model_dump(exclude_none=True)
+            for item in self.items.values()
+        ]
+
     def save_state(self) -> None:
         """Persist instance-only item data to configured state file."""
 
         if not self.state_file:
             return
         try:
-            payload = [
-                PersistedWorldItem(
-                    id=item.id,
-                    type=item.type,
-                    title=item.title,
-                    x=item.x,
-                    y=item.y,
-                    z=item.z,
-                    createdBy=item.createdBy,
-                    createdByName=item.createdByName,
-                    updatedBy=item.updatedBy,
-                    updatedByName=item.updatedByName,
-                    createdAt=item.createdAt,
-                    updatedAt=item.updatedAt,
-                    version=item.version,
-                    params=item.params,
-                    carrierId=item.carrierId,
-                ).model_dump(exclude_none=True)
-                for item in self.items.values()
-            ]
+            payload = self.dump_state()
             write_json_atomic(self.state_file, payload)
         except Exception as exc:
             LOGGER.warning(
@@ -274,7 +296,7 @@ class ItemService:
         if not self.piano_songs_file:
             return True
         try:
-            write_json_atomic(self.piano_songs_file, self.piano_songs)
+            write_json_atomic(self.piano_songs_file, self.dump_piano_songs())
             return True
         except Exception as exc:
             LOGGER.warning(

@@ -35,3 +35,10 @@ python main.py --config config.toml --host 127.0.0.1 --port 8765
 python main.py --config config.toml --allow-insecure-ws
 python main.py --config config.toml --ssl-cert /path/cert.pem --ssl-key /path/key.pem
 ```
+
+
+## Manual world checkpoints
+
+With persistent world storage configured, administrators can capture, browse, and restore from World Builder. Grant `world.checkpoint.capture` to builders who need to save checkpoints, `world.checkpoint.view` to those who need previews, and both view and `world.checkpoint.restore` to operators who may replace the live grid. Accounts, roles, sessions, and personal preferences are outside the captured world.
+
+The server writes checkpoints to `world-checkpoints/` beside the configured item state file. Each restore also saves a **Before restore** checkpoint. A complete restored generation is staged under `world-generations/` before switching `world-generations/current.json`. Later saves and restarts use that generation. Include both directories when backing up the state directory, and protect them like the live world files because they include door lock verifiers. Checkpoint browsing and preview are read-only. Manual checkpoints remain on disk until an operator manages their retention.

@@ -1266,6 +1266,7 @@ function textInputMaxLengthForMode(mode: typeof state.mode): number | null {
   if (mode === 'itemPropertyEdit') return 500;
   if (mode === 'micGainEdit') return 8;
   if (mode === 'adminRoleNameEdit') return 32;
+  if (mode === 'checkpointLabel') return 100;
   if (mode === 'worldBuilderPropertyEdit') return 200;
   if (mode === 'worldBuilderAmbianceEdit' || mode === 'worldBuilderRegionEdit') return 100;
   return null;
@@ -1294,6 +1295,7 @@ function isTextEditingMode(mode: typeof state.mode): boolean {
     mode === 'itemPropertyEdit' ||
     mode === 'micGainEdit' ||
     mode === 'adminRoleNameEdit' ||
+    mode === 'checkpointLabel' ||
     mode === 'worldBuilderPropertyEdit' ||
     mode === 'worldBuilderAmbianceEdit' ||
     mode === 'worldBuilderRegionEdit'
@@ -1863,6 +1865,7 @@ function disconnect(): void {
   stopTeleportLoopAudio();
   activeTeleport = null;
   itemInteractionController.reset();
+  worldBuilderController.resetCheckpoints();
   itemBehaviorRegistry.cleanup();
 }
 
@@ -1950,6 +1953,25 @@ const onAppMessage = createOnMessageHandler({
   handleItemTransferTargets,
   handleItemHandTargets,
   handleDoorResult: doorControls.result,
+  handleCheckpointResult: (message) => worldBuilderController.handleCheckpointResult(message),
+  handleWorldRestored: () => {
+    worldBuilderController.resetCheckpoints(true);
+    doorControls.close();
+    teleportTransition.reset();
+    stopTeleportLoopAudio();
+    activeTeleportLoopToken += 1;
+    activeTeleport = null;
+    radioRuntime.cleanupAll();
+    ambianceRuntime.cleanup();
+    itemEmitRuntime.cleanupAll();
+    elevatorAudioRuntime.cleanupAll();
+    itemInteractionController.reset();
+    itemBehaviorRegistry.cleanup();
+    state.mode = 'normal';
+    state.editingPropertyKey = null;
+    state.keysPressed = {};
+    state.elevatorItemId = null;
+  },
   handleStructureActionResult: (message) => worldBuilderController.handleActionResult(message),
   handleRegionActionResult: (message) => worldBuilderController.handleRegionActionResult(message),
   handleAmbianceActionResult: (message) => worldBuilderController.handleAmbianceActionResult(message),
@@ -2521,7 +2543,7 @@ function getAvailableCommandPaletteEntriesForMode(mode: GameMode): Array<Command
       voiceSendAllowed: authController.getVoiceSendAllowed(),
       mainHelpAvailable: mainHelpViewerLines.length > 0,
       hasAdminActions: getAvailableAdminActions().length > 0,
-      hasWorldBuilder: authController.hasPermission('world.structure.edit'),
+      hasWorldBuilder: ['world.structure.edit', 'world.checkpoint.capture', 'world.checkpoint.view'].some((permission) => authController.hasPermission(permission)),
       itemTypeCount: getItemTypeSequence().length,
       visibleItemCount: Array.from(state.items.values()).filter((item) => !item.carrierId).length,
       userCount: state.peers.size,
@@ -3065,6 +3087,10 @@ function handleModeInput(input: ModeInput): void {
       adminUserDeleteConfirm: ({ code: currentCode, key: currentKey }) => handleAdminUserDeleteConfirmModeInput(currentCode, currentKey),
       adminRoleNameEdit: ({ code: currentCode, key: currentKey, ctrlKey: currentCtrlKey }) =>
         handleAdminRoleNameEditModeInput(currentCode, currentKey, currentCtrlKey),
+      checkpointMenu: ({ code, key }) => worldBuilderController.handleCheckpointInput(code, key),
+      checkpointLabel: ({ code, key, ctrlKey }) => worldBuilderController.handleCheckpointInput(code, key, ctrlKey),
+      checkpointList: ({ code, key }) => worldBuilderController.handleCheckpointInput(code, key),
+      checkpointPreview: ({ code, key }) => worldBuilderController.handleCheckpointInput(code, key),
       worldBuilder: ({ code: currentCode, key: currentKey }) => worldBuilderController.handleRoot(currentCode, currentKey),
       worldBuilderPreset: ({ code: currentCode, key: currentKey }) => worldBuilderController.handlePreset(currentCode, currentKey),
       worldBuilderDirection: ({ code: currentCode, key: currentKey }) => worldBuilderController.handleDirection(currentCode, currentKey),
@@ -3134,6 +3160,9 @@ function getMobileTextEntry(): MobileTextEntry | null {
   }
   if (state.mode === 'micGainEdit') {
     return { label: 'Microphone gain', value: state.nicknameInput, maxLength, inputMode: 'decimal', submitLabel: 'Save' };
+  }
+  if (state.mode === 'checkpointLabel') {
+    return { label: 'Checkpoint label', value: state.nicknameInput, maxLength, inputMode: 'text', submitLabel: 'Save checkpoint' };
   }
   if (state.mode === 'worldBuilderRegionEdit') {
     return { label: 'Region name', value: state.nicknameInput, maxLength, inputMode: 'text', submitLabel: 'Save' };

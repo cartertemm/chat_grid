@@ -72,6 +72,13 @@ The keypad beeps once per digit. The success or failure sound plays after the fo
 
 ### World Builder
 
+Open **World Builder** with W or through Commands. **World checkpoints** offers these actions according to your permissions:
+
+- **Save checkpoint** takes an optional label. Press Enter or touch Save checkpoint. The server confirms after writing the checkpoint.
+- **Browse checkpoints** lists the newest first, 25 per page. Enter or Select previews a checkpoint with the changes it would make to the current world. Space reads help. Back returns to the selected row.
+- **Restore this checkpoint** replaces the shared authored world for everyone. The confirmation starts on No. If the world changed after preview, review the new comparison and confirm again. A successful restore leaves a recovery checkpoint labeled **Before restore**.
+
+
 - `W`: Open World Builder when the account has `world.structure.edit`.
 - `Add wall`: Select a server-configured type, then select the north, south, east, or west edge of the current square. Successful creation opens the new wall directly in the shared wall editor.
 - `Edit walls`: List current-floor walls nearest first, then change type, orientation, occupied edge anchors, slide, detailed properties, or delete the complete wall.

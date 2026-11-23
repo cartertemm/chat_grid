@@ -559,6 +559,28 @@ export const worldSoundSchema = z.object({
   doorOrientation: z.enum(['horizontal', 'vertical']).optional(),
 });
 
+const checkpointSummarySchema = z.object({
+  id: z.string(), label: z.string(), createdAt: z.number().int(), createdBy: z.string(),
+  counts: z.record(z.string(), z.number().int().nonnegative()),
+});
+const checkpointPreviewSchema = z.object({
+  checkpoint: checkpointSummarySchema, worldRevision: z.string(),
+  changes: z.record(z.string(), z.object({ added: z.number().int(), removed: z.number().int(), modified: z.number().int() })),
+  warnings: z.array(z.string()),
+});
+const checkpointResultSchema = z.object({
+  type: z.literal('checkpoint_result'), ok: z.boolean(), action: z.enum(['capture', 'list', 'preview', 'restore']), message: z.string(),
+  requestId: z.string().nullish(),
+  checkpoints: z.array(checkpointSummarySchema).nullish(), page: z.number().int().nonnegative().nullish(), hasNext: z.boolean().nullish(),
+  preview: checkpointPreviewSchema.nullish(),
+});
+const worldRestoredSchema = z.object({
+  type: z.literal('world_restored'), items: z.array(itemSchema), structures: z.array(wallStructureSchema),
+  ambiances: z.array(ambianceRegionSchema), regions: z.array(namedRegionSchema),
+});
+export type CheckpointSummary = z.infer<typeof checkpointSummarySchema>;
+export type CheckpointPreview = z.infer<typeof checkpointPreviewSchema>;
+
 export const incomingMessageSchema = z.discriminatedUnion('type', [
   authRequiredSchema,
   authResultSchema,
@@ -597,6 +619,8 @@ export const incomingMessageSchema = z.discriminatedUnion('type', [
   regionRemoveSchema,
   regionActionResultSchema,
   worldSoundSchema,
+  checkpointResultSchema,
+  worldRestoredSchema,
 ]);
 
 export type IncomingMessage = z.infer<typeof incomingMessageSchema>;
@@ -609,6 +633,7 @@ export type DoorAction = {
 };
 export type OutgoingMessage =
   | DoorAction
+  | { type: 'checkpoint_action'; action: 'capture' | 'list' | 'preview' | 'restore'; requestId?: string; label?: string; checkpointId?: string; page?: number; worldRevision?: string }
   | { type: 'auth_register'; username: string; password: string; email?: string }
   | { type: 'auth_login'; username: string; password: string }
   | { type: 'auth_resume'; sessionToken: string }

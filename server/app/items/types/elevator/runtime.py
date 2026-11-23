@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from math import isfinite
 from typing import Literal
 
+from ....runtime_tasks import cancel_and_join
 from ....acoustic_zones import (
     client_position_packet,
     floor_acoustic_zone_id,
@@ -61,15 +62,12 @@ class ElevatorRuntime:
         self.delivery = callbacks.delivery
         self._tasks: dict[str, asyncio.Task[None]] = {}
 
-    async def shutdown(self) -> None:
+    def shutdown(self) -> Awaitable[None]:
         """Cancel and await every active elevator transition task."""
 
         tasks = list(self._tasks.values())
-        for task in tasks:
-            task.cancel()
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
         self._tasks.clear()
+        return cancel_and_join(tasks)
 
     async def cancel(self, item_id: str) -> None:
         """Cancel one elevator's active transition task, if present."""

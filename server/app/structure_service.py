@@ -308,21 +308,56 @@ class StructureService:
                 crossed.append(wall)
         return crossed
 
+    def dump_state(self) -> list[dict]:
+        """Encode walls and private PIN verifiers for durable world storage."""
+
+        payload = []
+        for wall in self.structures.values():
+            entry = wall.model_dump()
+            entry["doorPins"] = {
+                door.id: self.door_pins[door.id]
+                for door in wall.doors
+                if door.id in self.door_pins
+            }
+            payload.append(entry)
+        return payload
+
+    def restore_state(self, raw: object) -> None:
+        """Validate all walls and lock verifiers before replacing live geometry."""
+
+        if not isinstance(raw, list):
+            raise StructureError("Structure state must be a list.")
+        staged = StructureService(
+            state_file=None, grid_size=self.grid_size, presets=self.presets
+        )
+        for entry in raw:
+            wall = WallStructure.model_validate(entry)
+            if wall.id in staged.structures:
+                raise StructureError("Duplicate wall id.")
+            staged._validate_wall(wall)
+            pins = entry.get("doorPins", {})
+            if not isinstance(pins, dict):
+                raise StructureError("Door PIN state is invalid.")
+            for door in wall.doors:
+                if door.hasPin:
+                    verifier = pins.get(door.id)
+                    if not isinstance(verifier, str) or not verifier.startswith(
+                        "$argon2"
+                    ):
+                        raise StructureError("Door PIN verifier is missing.")
+                    staged.door_pins[door.id] = verifier
+            staged._insert(wall)
+        self.structures = staged.structures
+        self._edges = staged._edges
+        self.door_pins = staged.door_pins
+
     def save_state(self) -> None:
         """Persist structures independently from world item state."""
 
         if self.state_file is None:
             return
         try:
-            payload = []
-            for wall in self.structures.values():
-                entry = wall.model_dump()
-                entry["doorPins"] = {
-                    door.id: self.door_pins[door.id]
-                    for door in wall.doors
-                    if door.id in self.door_pins
-                }
-                payload.append(entry)
+            payload = self.dump_state()
             write_json_atomic(self.state_file, payload)
         except Exception as exc:
             LOGGER.warning(
@@ -339,23 +374,7 @@ class StructureService:
             if text is None:
                 return
             raw = json.loads(text)
-            if not isinstance(raw, list):
-                raise StructureError("Structure state must be a list.")
-            for entry in raw:
-                wall = WallStructure.model_validate(entry)
-                self._validate_wall(wall)
-                pins = entry.get("doorPins", {})
-                if not isinstance(pins, dict):
-                    raise StructureError("Door PIN state is invalid.")
-                for door in wall.doors:
-                    if door.hasPin:
-                        verifier = pins.get(door.id)
-                        if not isinstance(verifier, str) or not verifier.startswith(
-                            "$argon2"
-                        ):
-                            raise StructureError("Door PIN verifier is missing.")
-                        self.door_pins[door.id] = verifier
-                self._insert(wall)
+            self.restore_state(raw)
             LOGGER.info(
                 "loaded %d structures from %s", len(self.structures), self.state_file
             )
