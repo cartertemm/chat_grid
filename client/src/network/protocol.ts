@@ -569,6 +569,7 @@ const checkpointPreviewSchema = z.object({
 });
 const checkpointResultSchema = z.object({
   type: z.literal('checkpoint_result'), ok: z.boolean(), action: z.enum(['capture', 'list', 'preview', 'restore']), message: z.string(),
+  requestId: z.string().nullish(),
   checkpoints: z.array(checkpointSummarySchema).nullish(), page: z.number().int().nonnegative().nullish(), hasNext: z.boolean().nullish(),
   preview: checkpointPreviewSchema.nullish(),
 });
@@ -631,7 +632,7 @@ export type DoorAction = {
 };
 export type OutgoingMessage =
   | DoorAction
-  | { type: 'checkpoint_action'; action: 'capture' | 'list' | 'preview' | 'restore'; label?: string; checkpointId?: string; page?: number; worldRevision?: string }
+  | { type: 'checkpoint_action'; action: 'capture' | 'list' | 'preview' | 'restore'; requestId?: string; label?: string; checkpointId?: string; page?: number; worldRevision?: string }
   | { type: 'auth_register'; username: string; password: string; email?: string }
   | { type: 'auth_login'; username: string; password: string }
   | { type: 'auth_resume'; sessionToken: string }

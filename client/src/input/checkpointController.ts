@@ -15,6 +15,21 @@ export function createCheckpointController(deps: WorldBuilderDeps, back: () => v
   let hasNext = false;
   let preview: CheckpointPreview | null = null;
   let waiting = false;
+  let sequence = 0;
+  let pending: { action: 'capture' | 'list' | 'preview' | 'restore'; requestId: string } | null = null;
+  let restoreCompletion: string | null = null;
+
+  function reset(worldRestored = false) {
+    restoreCompletion = worldRestored && pending?.action === 'restore' ? pending.requestId : null;
+    pending = null;
+    waiting = false;
+    preview = null;
+  }
+  function request(packet: { action: 'capture' | 'list' | 'preview' | 'restore'; label?: string; page?: number; checkpointId?: string; worldRevision?: string }) {
+    pending = { action: packet.action, requestId: `checkpoint-${++sequence}` };
+    waiting = true;
+    deps.send({ type: 'checkpoint_action', ...packet, requestId: pending.requestId });
+  }
 
   const allowed = (action: 'capture' | 'view' | 'restore') => deps.hasPermission(`world.checkpoint.${action}`);
   function menuRows(): Row[] {
@@ -24,8 +39,7 @@ export function createCheckpointController(deps: WorldBuilderDeps, back: () => v
     return rows;
   }
   function open() {
-    waiting = false;
-    preview = null;
+    reset();
     index = 0;
     const rows = menuRows();
     if (!rows.length) { back(); return; }
@@ -52,10 +66,9 @@ export function createCheckpointController(deps: WorldBuilderDeps, back: () => v
     deps.announceMenuEntry('Checkpoints', rows[index]?.label ?? 'No saved checkpoints.');
   }
   function requestList(nextPage: number) {
-    waiting = true;
     index = 0;
     deps.state.mode = 'checkpointList';
-    deps.send({ type: 'checkpoint_action', action: 'list', page: nextPage });
+    request({ action: 'list', page: nextPage });
   }
   function summary(value: CheckpointPreview): string {
     const changes = Object.entries(value.changes).map(([type, change]) => `${DATASET_LABELS[type] ?? type}: ${change.added} added, ${change.removed} removed, ${change.modified} modified`).join('. ');
@@ -77,14 +90,16 @@ export function createCheckpointController(deps: WorldBuilderDeps, back: () => v
       if (action === 'cancel') { deps.setReplaceTextOnNextType(false); open(); return; }
       if (action === 'submit') {
         if (!allowed('capture')) { open(); return; }
-        waiting = true;
-        deps.send({ type: 'checkpoint_action', action: 'capture', label: deps.state.nicknameInput.trim() });
+        request({ action: 'capture', label: deps.state.nicknameInput.trim() });
         deps.setReplaceTextOnNextType(false);
         deps.state.mode = 'checkpointMenu';
       } else deps.applyTextInputEdit(code, key, 100, ctrlKey, true);
       return;
     }
-    if (waiting) return;
+    if (waiting) {
+      if (code === 'Escape') { reset(); open(); deps.cancel(); }
+      return;
+    }
     const mode = deps.state.mode;
     const rows = mode === 'checkpointMenu' ? menuRows() : mode === 'checkpointList' ? listRows() : previewRows();
     if (code === 'Escape' && !rows.length) { open(); return; }
@@ -113,8 +128,7 @@ export function createCheckpointController(deps: WorldBuilderDeps, back: () => v
       if (row.id === 'previous' || row.id === 'next') { index = 0; requestList(page + (row.id === 'next' ? 1 : -1)); }
       else {
         listIndex = index;
-        waiting = true;
-        deps.send({ type: 'checkpoint_action', action: 'preview', checkpointId: row.id });
+        request({ action: 'preview', checkpointId: row.id });
       }
     } else if (row.id === 'summary') {
       if (preview) deps.updateStatus(summary(preview));
@@ -125,14 +139,20 @@ export function createCheckpointController(deps: WorldBuilderDeps, back: () => v
         onCancel: showPreview,
         onConfirm: () => {
           if (!allowed('restore')) { open(); return; }
-          waiting = true;
           deps.state.mode = 'checkpointPreview';
-          deps.send({ type: 'checkpoint_action', action: 'restore', checkpointId: selected.checkpoint.id, worldRevision: selected.worldRevision });
+          request({ action: 'restore', checkpointId: selected.checkpoint.id, worldRevision: selected.worldRevision });
         },
       });
     }
   }
   function result(message: Extract<IncomingMessage, { type: 'checkpoint_result' }>) {
+    if (restoreCompletion && message.requestId === restoreCompletion && message.action === 'restore') {
+      restoreCompletion = null;
+      if (message.ok) { deps.updateStatus(message.message); deps.confirm(); }
+      return;
+    }
+    if (!pending || message.requestId !== pending.requestId || message.action !== pending.action) return;
+    pending = null;
     waiting = false;
     if (!message.ok) {
       if (message.preview) { preview = message.preview; showPreview(); }
@@ -155,5 +175,5 @@ export function createCheckpointController(deps: WorldBuilderDeps, back: () => v
       deps.confirm();
     }
   }
-  return { open, handleInput, result };
+  return { open, reset, handleInput, result };
 }

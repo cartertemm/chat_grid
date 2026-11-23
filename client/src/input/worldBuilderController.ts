@@ -553,6 +553,7 @@ export function createWorldBuilderController(deps: WorldBuilderDeps) {
 
   return {
     setPresets(next: StructurePreset[]) {
+      checkpointController.reset();
       presets = [...next];
       pendingSettings.length = 0;
     },
@@ -566,6 +567,7 @@ export function createWorldBuilderController(deps: WorldBuilderDeps) {
     handleRoot,
     handleCheckpointInput: checkpointController.handleInput,
     handleCheckpointResult: checkpointController.result,
+    resetCheckpoints: checkpointController.reset,
     handlePreset,
     handleDirection,
     handleWallList,

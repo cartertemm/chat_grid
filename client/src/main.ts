@@ -1852,6 +1852,7 @@ function disconnect(): void {
   stopTeleportLoopAudio();
   activeTeleport = null;
   itemInteractionController.reset();
+  worldBuilderController.resetCheckpoints();
   itemBehaviorRegistry.cleanup();
 }
 
@@ -1941,6 +1942,7 @@ const onAppMessage = createOnMessageHandler({
   handleDoorResult: doorControls.result,
   handleCheckpointResult: (message) => worldBuilderController.handleCheckpointResult(message),
   handleWorldRestored: () => {
+    worldBuilderController.resetCheckpoints(true);
     doorControls.close();
     teleportTransition.reset();
     stopTeleportLoopAudio();
