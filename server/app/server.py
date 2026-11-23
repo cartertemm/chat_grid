@@ -49,6 +49,9 @@ from .item_catalog import (
 )
 from .item_runtime import ItemRuntime
 from .item_service import ItemService
+from .world_state import CheckpointError, PAGE_SIZE, WorldStateStore
+from .world_restore import public_world, reconcile_world_restore
+from .world_gate import WorldMutationGate
 from .models import (
     AuthLoginPacket,
     AuthLogoutPacket,
@@ -91,6 +94,10 @@ from .models import (
     BroadcastNicknamePacket,
     BroadcastTeleportCompletePacket,
     ChatMessagePacket,
+    CheckpointActionPacket,
+    CheckpointResultPacket,
+    CheckpointPreview,
+    CheckpointSummary,
     ClientPacket,
     FacingDeg,
     ItemAddPacket,
@@ -268,6 +275,9 @@ class SignalingServer:
             "item_changes": (limits.item_changes, limits.item_window_ms),
             "item_updates": (limits.item_updates, limits.item_update_window_ms),
         }
+        self.world_store = WorldStateStore(state_file)
+        state_file = self.world_store.active_state_file()
+        self._world_gate = WorldMutationGate()
         self.item_service = ItemService(state_file=state_file)
         structure_state_file = (
             state_file.with_name("structures.json") if state_file else None
@@ -291,6 +301,12 @@ class SignalingServer:
             sounds_dir=ambiance_sounds_dir,
             floor_elevations=FLOOR_ELEVATIONS,
         )
+        self.world_store.bind_services(
+            self.item_service,
+            self.structure_service,
+            self.ambiance_service,
+            self.region_service,
+        )
         self.item_runtime = ItemRuntime(self)
         self.movement_tick_ms = MOVEMENT_TICK_MS
         self.movement_max_steps_per_tick = MOVEMENT_MAX_STEPS_PER_TICK
@@ -306,6 +322,7 @@ class SignalingServer:
         )
         self.base_path = self._normalize_base_path(base_path)
         self.grid_name = str(grid_name).strip() or "Chat Grid"
+        self.world_store.source_grid = self.grid_name
         self.welcome_message = (
             str(welcome_message).strip()
             or "Welcome to the Chat Grid, your immersive audio playground. Configure your audio, then Log in or register to join the grid."
@@ -753,10 +770,7 @@ class SignalingServer:
             self._pending_state_save_handle.cancel()
             self._pending_state_save_handle = None
         self._pending_state_save_started_at = None
-        self.item_service.save_state()
-        self.structure_service.save_state()
-        self.ambiance_service.save_state()
-        self.region_service.save_state()
+        self.world_store.save()
 
     def _request_state_save(self) -> None:
         """Debounce/coalesce world-state persistence to reduce write churn."""
@@ -1067,58 +1081,61 @@ class SignalingServer:
                 self._client_ip(client),
             )
         finally:
-            if websocket in self.clients:
-                disconnected = self.clients.pop(websocket)
-                # Each step is guarded so one failure cannot skip the rest or
-                # stop other users from hearing that this user left.
-                try:
-                    self.door_runtime.release_client(disconnected)
-                    await self.item_runtime.prepare_client_disconnect(disconnected)
-                except Exception:
-                    LOGGER.exception(
-                        "disconnect item release failed id=%s", disconnected.id
+            async with self._world_gate.operation():
+                if websocket in self.clients:
+                    disconnected = self.clients.pop(websocket)
+                    # Each step is guarded so one failure cannot skip the rest or
+                    # stop other users from hearing that this user left.
+                    try:
+                        self.door_runtime.release_client(disconnected)
+                        await self.item_runtime.prepare_client_disconnect(disconnected)
+                    except Exception:
+                        LOGGER.exception(
+                            "disconnect item release failed id=%s", disconnected.id
+                        )
+                    try:
+                        self._persist_client_position(disconnected, force=True)
+                    except Exception:
+                        LOGGER.exception(
+                            "disconnect position save failed id=%s", disconnected.id
+                        )
+                    try:
+                        self._persist_client_last_seen(disconnected, force=True)
+                    except Exception:
+                        LOGGER.exception(
+                            "disconnect last-seen save failed id=%s", disconnected.id
+                        )
+                    if disconnected.user_id:
+                        self._last_position_persist_ms_by_user.pop(
+                            disconnected.user_id, None
+                        )
+                        self._last_seen_persist_ms_by_user.pop(
+                            disconnected.user_id, None
+                        )
+                    try:
+                        await self.item_runtime.finish_client_disconnect(disconnected)
+                    except Exception:
+                        LOGGER.exception(
+                            "disconnect carried-item drop failed id=%s", disconnected.id
+                        )
+                    LOGGER.info(
+                        "client disconnected id=%s nickname=%s total=%d",
+                        disconnected.id,
+                        disconnected.nickname,
+                        len(self.clients),
                     )
-                try:
-                    self._persist_client_position(disconnected, force=True)
-                except Exception:
-                    LOGGER.exception(
-                        "disconnect position save failed id=%s", disconnected.id
+                    await self.delivery.broadcast(
+                        UserLeftPacket(type="user_left", id=disconnected.id),
+                        exclude=disconnected,
                     )
-                try:
-                    self._persist_client_last_seen(disconnected, force=True)
-                except Exception:
-                    LOGGER.exception(
-                        "disconnect last-seen save failed id=%s", disconnected.id
+                    await self.delivery.broadcast(
+                        BroadcastChatMessagePacket(
+                            type="chat_message",
+                            message=f"{disconnected.nickname} has logged out.",
+                            system=True,
+                        ),
+                        exclude=disconnected,
                     )
-                if disconnected.user_id:
-                    self._last_position_persist_ms_by_user.pop(
-                        disconnected.user_id, None
-                    )
-                    self._last_seen_persist_ms_by_user.pop(disconnected.user_id, None)
-                try:
-                    await self.item_runtime.finish_client_disconnect(disconnected)
-                except Exception:
-                    LOGGER.exception(
-                        "disconnect carried-item drop failed id=%s", disconnected.id
-                    )
-                LOGGER.info(
-                    "client disconnected id=%s nickname=%s total=%d",
-                    disconnected.id,
-                    disconnected.nickname,
-                    len(self.clients),
-                )
-                await self.delivery.broadcast(
-                    UserLeftPacket(type="user_left", id=disconnected.id),
-                    exclude=disconnected,
-                )
-                await self.delivery.broadcast(
-                    BroadcastChatMessagePacket(
-                        type="chat_message",
-                        message=f"{disconnected.nickname} has logged out.",
-                        system=True,
-                    ),
-                    exclude=disconnected,
-                )
 
     async def _send_welcome(self, client: ClientConnection) -> None:
         """Send initial world snapshot to a newly connected client."""
@@ -1152,21 +1169,7 @@ class SignalingServer:
                 acousticZoneId=client_acoustic_zone_id(client),
             ),
             users=users,
-            items=[
-                self.item_runtime.outbound_item(item).model_dump(exclude_none=True)
-                for item in self.items.values()
-            ],
-            structures=[
-                structure.model_dump()
-                for structure in self.structure_service.structures.values()
-            ],
-            regions=[
-                region.model_dump() for region in self.region_service.regions.values()
-            ],
-            ambiances=[
-                ambiance.model_dump()
-                for ambiance in self.ambiance_service.ambiances.values()
-            ],
+            **public_world(self),
             worldConfig={
                 "gridSize": self.grid_size,
                 "movementTickMs": self.movement_tick_ms,
@@ -2316,6 +2319,108 @@ class SignalingServer:
 
         return True
 
+    def _can_manage_checkpoint(self, client: ClientConnection, action: str) -> bool:
+        """Check both operation authority and required preview visibility."""
+
+        permission = {
+            "capture": "world.checkpoint.capture",
+            "list": "world.checkpoint.view",
+            "preview": "world.checkpoint.view",
+            "restore": "world.checkpoint.restore",
+        }[action]
+        return self._client_has_permission(client, permission) and (
+            action != "restore"
+            or self._client_has_permission(client, "world.checkpoint.view")
+        )
+
+    async def _handle_checkpoint_packet(
+        self, client: ClientConnection, packet: CheckpointActionPacket
+    ) -> None:
+        """Perform one authorized checkpoint operation under the world mutation gate."""
+
+        result = CheckpointResultPacket(
+            type="checkpoint_result",
+            requestId=packet.requestId,
+            action=packet.action,
+            ok=False,
+            message="Not authorized to manage world checkpoints.",
+        )
+        if not self._can_manage_checkpoint(client, packet.action):
+            await self.delivery.send(client, result)
+            return
+        creator = client.username or client.nickname
+        try:
+            if packet.action == "capture":
+                captured = self.world_store.capture(packet.label.strip(), creator)
+                result.checkpoints = [CheckpointSummary.model_validate(captured)]
+                result.message = "Checkpoint saved."
+            elif packet.action == "list":
+                page = self.world_store.list_checkpoints(packet.page)
+                result.checkpoints = [
+                    CheckpointSummary.model_validate(entry)
+                    for entry in page["checkpoints"]
+                ]
+                result.page = packet.page
+                result.hasNext = (packet.page + 1) * PAGE_SIZE < page["total"]
+                result.message = "World checkpoints."
+            elif packet.action == "preview":
+                if packet.checkpointId is None:
+                    raise CheckpointError("Choose a checkpoint to preview.")
+                result.preview = CheckpointPreview.model_validate(
+                    self.world_store.preview(packet.checkpointId)
+                )
+                result.message = "Checkpoint preview ready."
+            else:
+                if packet.checkpointId is None or packet.worldRevision is None:
+                    raise CheckpointError(
+                        "Preview this checkpoint before restoring it."
+                    )
+                current_preview = CheckpointPreview.model_validate(
+                    self.world_store.preview(packet.checkpointId)
+                )
+                if current_preview.worldRevision != packet.worldRevision:
+                    result.preview = current_preview
+                    raise CheckpointError(
+                        "The world changed since preview. Review the updated preview and confirm again."
+                    )
+                restored = self.world_store.restore(
+                    packet.checkpointId,
+                    packet.worldRevision,
+                    creator,
+                )
+                if self._pending_state_save_handle is not None:
+                    self._pending_state_save_handle.cancel()
+                    self._pending_state_save_handle = None
+                self._pending_state_save_started_at = None
+                await reconcile_world_restore(self)
+                summary = CheckpointSummary.model_validate(restored["checkpoint"])
+                result.checkpoints = [summary]
+                result.message = f"Restored checkpoint {summary.label or summary.id}."
+                if not restored["durable"]:
+                    result.message += " The live world was restored, but saving the selection to disk could not be confirmed."
+                await self.delivery.broadcast(
+                    BroadcastChatMessagePacket(
+                        type="chat_message",
+                        message=result.message,
+                        system=True,
+                    ),
+                    exclude=client,
+                )
+                LOGGER.info(
+                    "world restored actor=%s checkpoint=%s", client.user_id, summary.id
+                )
+            result.ok = True
+        except CheckpointError as exc:
+            result.message = str(exc)
+        except OSError:
+            LOGGER.exception(
+                "checkpoint operation failed action=%s actor=%s",
+                packet.action,
+                client.user_id,
+            )
+            result.message = "Checkpoint storage failed. Please check the server log."
+        await self.delivery.send(client, result)
+
     async def _handle_message(self, client: ClientConnection, raw_message: str) -> None:
         """Decode, validate, and route one inbound client packet."""
 
@@ -2348,7 +2453,8 @@ class SignalingServer:
             return
 
         if isinstance(packet, WelcomeReadyPacket):
-            await self._activate_authenticated_client(client)
+            async with self._world_gate.operation():
+                await self._activate_authenticated_client(client)
             return
 
         if isinstance(packet, PingPacket):
@@ -2364,6 +2470,53 @@ class SignalingServer:
             PACKET_LOGGER.info(
                 "ignoring pre-ready packet id=%s type=%s", client.id, packet.type
             )
+            return
+
+        checkpoint = isinstance(packet, CheckpointActionPacket)
+        if isinstance(packet, CheckpointActionPacket):
+            rejection = None
+            if not self._can_manage_checkpoint(client, packet.action):
+                rejection = "Not authorized to manage world checkpoints."
+            elif not self._consume_rate_limit(client, "item_changes"):
+                rejection = "You are requesting checkpoints too quickly. Please wait."
+            if rejection is not None:
+                await self.delivery.send(
+                    client,
+                    CheckpointResultPacket(
+                        type="checkpoint_result",
+                        requestId=packet.requestId,
+                        action=packet.action,
+                        ok=False,
+                        message=rejection,
+                    ),
+                )
+                return
+        async with self._world_gate.operation(exclusive=checkpoint):
+            if checkpoint:
+                # Keep the exclusive gate until a published restore has finished
+                # reconciling every client, even if the requesting connection leaves.
+                operation = asyncio.create_task(
+                    self._handle_world_packet(client, packet)
+                )
+                interrupted = False
+                while not operation.done():
+                    try:
+                        await asyncio.shield(operation)
+                    except asyncio.CancelledError:
+                        interrupted = True
+                operation.result()
+                if interrupted:
+                    raise asyncio.CancelledError
+            else:
+                await self._handle_world_packet(client, packet)
+
+    async def _handle_world_packet(
+        self, client: ClientConnection, packet: ClientPacket
+    ) -> None:
+        """Serialize gameplay mutations with checkpoint publication and restore."""
+
+        if isinstance(packet, CheckpointActionPacket):
+            await self._handle_checkpoint_packet(client, packet)
             return
 
         if isinstance(packet, LiveKitTokenRequestPacket):

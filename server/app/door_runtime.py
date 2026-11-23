@@ -13,6 +13,7 @@ import uuid
 from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError
 
+from .runtime_tasks import cancel_and_join
 from .client import ClientConnection
 from .models import DoorActionPacket, DoorActionResultPacket, WallDoor, WallStructure
 from .structure_service import StructureError, StructureService
@@ -61,20 +62,24 @@ class DoorRuntime:
         self._hasher = PasswordHasher(time_cost=2, memory_cost=8192, parallelism=1)
         self._hash_slots = asyncio.Semaphore(2)
 
+    @property
+    def running(self) -> bool:
+        """Whether the periodic deadline loop is active."""
+        return self._task is not None and not self._task.done()
+
     def start(self) -> None:
         """Run deadline reconciliation while the server is serving."""
 
         if self._task is None or self._task.done():
             self._task = asyncio.create_task(self._run())
 
-    async def stop(self) -> None:
+    def stop(self) -> Awaitable[None]:
         """Cancel transient keypad work before shutdown."""
 
-        if self._task is not None:
-            self._task.cancel()
-            await asyncio.gather(self._task, return_exceptions=True)
-            self._task = None
+        task = self._task
+        self._task = None
         self.sessions.clear()
+        return cancel_and_join([task] if task is not None else [])
 
     def release_client(self, client: ClientConnection) -> None:
         """Discard partial entry when a client disconnects."""
