@@ -27,7 +27,7 @@ export function createPlatformBuilderController(deps: WorldBuilderDeps, back: ()
   let requestSequence = 0;
   let session = 0;
   let pending: { kind: 'add' | 'update' | 'delete'; requestId: string; session: number; platformId?: string; property?: Property; value?: string | number } | null = null;
-  const queuedSteps: string[] = [];
+  let queuedSteps: { property: Property; code: string }[] = [];
   let platforms: Platform[] = [];
   let footstepSets: FootstepSet[] = [{ id: 'default', title: 'Default', urls: [] }];
 
@@ -152,17 +152,19 @@ export function createPlatformBuilderController(deps: WorldBuilderDeps, back: ()
     deps.send({ type: 'platform_update', platformId: selectedId, requestId, [property]: value });
   }
 
-  function sendQueuedStep(property: Property): void {
-    const code = queuedSteps.shift();
-    const platform = current();
-    if (!code || !platform) return;
-    const adjustment = adjustPropertyValue(code, propertyValue(platform, property), metadata(property));
-    if (!adjustment || adjustment.hitBoundary) {
-      queuedSteps.length = 0;
-      deps.cancel();
+  function sendQueuedStep(): void {
+    while (queuedSteps.length > 0) {
+      const { property, code } = queuedSteps.shift()!;
+      const platform = current();
+      if (!platform) return;
+      const adjustment = adjustPropertyValue(code, propertyValue(platform, property), metadata(property));
+      if (!adjustment || adjustment.hitBoundary) {
+        if (PROPERTIES[index]?.id === property) deps.cancel();
+        continue;
+      }
+      setProperty(property, adjustment.value as string | number);
       return;
     }
-    setProperty(property, adjustment.value as string | number);
   }
 
   function handleActions(code: string, key: string): void {
@@ -175,7 +177,7 @@ export function createPlatformBuilderController(deps: WorldBuilderDeps, back: ()
       const adjustment = adjustPropertyValue(code, propertyValue(platform, property), metadata(property));
       if (adjustment) {
         if (pending) {
-          if (pending.kind === 'update' && pending.property === property) queuedSteps.push(code);
+          if (pending.kind === 'update') queuedSteps.push({ property, code });
         } else if (adjustment.hitBoundary) deps.cancel();
         else setProperty(property, adjustment.value as string | number);
         return;
@@ -187,7 +189,6 @@ export function createPlatformBuilderController(deps: WorldBuilderDeps, back: ()
     });
     if (control.type === 'move') {
       index = control.index;
-      queuedSteps.length = 0;
     }
     else if (control.type === 'cancel') { openList(); deps.cancel(); }
     else if (control.type === 'select') {
@@ -283,18 +284,25 @@ export function createPlatformBuilderController(deps: WorldBuilderDeps, back: ()
       pending = null;
       const inEditor = deps.state.mode === 'worldBuilderPlatformActions' || deps.state.mode === 'worldBuilderPlatformEdit';
       if (operation.session !== session || !inEditor) { queuedSteps.length = 0; return; }
-      if (!message.ok) { queuedSteps.length = 0; deps.updateStatus(message.message); deps.cancel(); return; }
+      if (!message.ok) {
+        queuedSteps = operation.kind === 'update'
+          ? queuedSteps.filter((step) => step.property !== operation.property) : [];
+        deps.updateStatus(message.message);
+        deps.cancel();
+        sendQueuedStep();
+        return;
+      }
       if (operation?.kind === 'update' && operation.property) {
-        if (operation.platformId !== selectedId || PROPERTIES[index]?.id !== operation.property) { queuedSteps.length = 0; return; }
+        if (operation.platformId !== selectedId) { queuedSteps.length = 0; return; }
         const platform = operation.platformId ? deps.state.platforms.get(operation.platformId) : undefined;
         const value = platform?.[operation.property];
-        if (value !== undefined && platform) {
+        if (value !== undefined && platform && PROPERTIES[index]?.id === operation.property) {
           const boundsChanged = value !== operation.value && ['startX', 'startY', 'endX', 'endY'].includes(operation.property);
           const axis = operation.property.endsWith('X') ? 'X' : 'Y';
           announcePropertyValue(deps.updateStatus, boundsChanged ? `${platform[`start${axis}`]} to ${platform[`end${axis}`]}` : value, metadata(operation.property));
         }
         deps.blip();
-        sendQueuedStep(operation.property);
+        sendQueuedStep();
       } else if (operation?.kind === 'add' && message.platformId) {
         selectedId = message.platformId;
         draft = null;

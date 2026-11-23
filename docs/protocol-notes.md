@@ -77,7 +77,7 @@ This is a behavior guide for packet semantics beyond raw schemas.
 - `nickname_result`: accepted/rejected nickname result.
 - `item_upsert`: full item replacement after mutation.
 - `item_remove`: item deletion.
-- `item_action_result`: action success/failure and user-facing message.
+- `item_action_result`: action success/failure and user-facing message. When an `item_update` includes a `requestId`, the server echoes it in the result, including rejections. The editor matches the reply to the pending adjustment and uses the authoritative `item_upsert` for the accepted value.
 - `item_transfer_targets`: transfer target account list for one item.
 - `item_hand_targets`: eligible handoff target list for one item; each target has `userId`, `username`, and `online: true`.
 - `item_use_sound`: spatial one-shot sound on successful item use (if `useSound` configured), including source `acousticZoneId`.

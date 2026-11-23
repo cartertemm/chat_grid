@@ -8,6 +8,8 @@ In property editors, moving to a setting reads its name and current value. Adjus
 
 Press Space on a property row or in its option list to hear help for the current selection. Numeric property help includes the range and step when defined. In a numeric editor, Up and Down move one step, and Page Up and Page Down move ten. Text fields and private PIN entry keep their typing controls.
 
+For saved platforms and items, you can press adjustment keys again or move to another property while an edit is pending. Each step builds on the server's accepted value. A successful adjustment is spoken only while its property is selected.
+
 ## Touch Controls
 
 - Touch controls appear automatically on coarse-pointer devices and can be shown or hidden from Settings.
@@ -61,7 +63,7 @@ Press Space on a property row or in its option list to hear help for the current
 - `Enter`: Use item
 - `Shift+Enter`: Secondary item action
 - For an elevator, `Enter` calls or starts opening it, enters or exits only after the door is fully open, and has no boarding effect while the door is opening or closing.
-- A two-stop car selects the other stop when you board. With three or more stops, boarding opens the shared floor selector. `Up`/`Down` browse destinations and direction, `Enter` requests the selected stop, and `Escape` closes the selector while you remain aboard. **Choose floor** in Commands or touch controls reopens it. `Shift+Enter` reports the car's status.
+- A two-stop car selects the other stop when you board. With three or more stops, boarding opens the shared floor selector. `Up`/`Down` browse destinations and direction, `Enter` requests the selected stop, and `Escape` closes the selector while you remain aboard. An open selector updates at departure and arrival, keeping the highlighted stop when it is still available. During a trip, each listed stop is described as above or below the current destination. **Choose floor** in Commands or touch controls reopens it. `Shift+Enter` reports the car's status.
 - Elevator **Stops** accepts a comma-delimited list such as `0,20,40`. **Speed** controls Z units traveled per second, defaulting to 10. Exiting at a stop without a platform lands you on the highest platform below the shaft. If there is no platform below, you remain aboard.
 
 ### Wall doors

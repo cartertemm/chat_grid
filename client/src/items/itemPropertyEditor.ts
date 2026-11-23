@@ -3,6 +3,7 @@ import { getEditSessionAction } from '../input/editSession';
 import { type WorldItem } from '../state/gameState';
 import type { OptionSelectorRequest } from '../input/optionSelector';
 import { adjustPropertyValue, applyNumericPropertyKey, announcePropertyValue, formatPropertyRow, getPropertyOptions } from '../input/propertyControls';
+import type { IncomingMessage } from '../network/protocol';
 
 /**
  * Dependencies required to drive item property inspect/edit flows.
@@ -41,7 +42,6 @@ type EditorDeps = {
   ) => { ok: true; value: number } | { ok: false; message: string };
   applyTextInputEdit: (code: string, key: string, maxLength: number, ctrlKey?: boolean, allowReplaceOnNextType?: boolean) => void;
   setReplaceTextOnNextType: (value: boolean) => void;
-  suppressItemPropertyEchoMs: (ms: number) => void;
   onPreviewPropertyChange?: (item: WorldItem, key: string, value: unknown) => void;
   updateStatus: (message: string) => void;
   sfxUiBlip: () => void;
@@ -54,16 +54,106 @@ type EditorDeps = {
 export function createItemPropertyEditor(deps: EditorDeps): {
   handleItemPropertiesModeInput: (code: string, key: string) => void;
   handleItemPropertyEditModeInput: (code: string, key: string, ctrlKey: boolean) => void;
+  reset: () => void;
+  shouldAnnounceEcho: (itemId: string) => boolean;
+  handleActionResult: (message: Extract<IncomingMessage, { type: 'item_action_result' }>) => boolean;
 } {
+  type Change = { itemId: string; key: string; code?: string; value?: string | number | boolean };
+  const queued: Change[] = [];
+  let pending: (Change & { requestId: string; previousStop: unknown }) | null = null;
+  let requestSequence = 0;
+  let session = 0;
+
+  function reset(): void {
+    session += 1;
+    queued.length = 0;
+    pending = null;
+  }
+
+  function isEditing(itemId: string): boolean {
+    return deps.state.selectedItemId === itemId
+      && ['itemProperties', 'itemPropertyEdit', 'optionSelect'].includes(deps.state.mode);
+  }
+
+  function sendNext(): void {
+    if (pending) return;
+    while (queued.length > 0) {
+      const change = queued.shift()!;
+      const item = deps.state.items.get(change.itemId);
+      if (!item || !isEditing(change.itemId)) { reset(); return; }
+      let value = change.value;
+      if (change.code) {
+        const metadata = {
+          ...deps.getItemPropertyMetadata(item.type, change.key),
+          options: deps.getItemPropertyOptionValues(item.type, change.key),
+        };
+        const current = item.params[change.key] ?? deps.getItemPropertyValue(item, change.key);
+        const adjustment = adjustPropertyValue(change.code, current, metadata);
+        if (!adjustment || adjustment.hitBoundary) {
+          deps.sfxUiCancel();
+          continue;
+        }
+        value = adjustment.value;
+      }
+      if (value === undefined) continue;
+      pending = { ...change, requestId: `item-property-${++requestSequence}`, previousStop: item.params.currentZ };
+      deps.signalingSend({
+        type: 'item_update', itemId: change.itemId, requestId: pending.requestId,
+        ...(change.key === 'title' ? { title: value } : { params: { [change.key]: value } }),
+      });
+      return;
+    }
+  }
+
+  function enqueue(change: Change): void {
+    queued.push(change);
+    sendNext();
+  }
+
+  function handleActionResult(message: Extract<IncomingMessage, { type: 'item_action_result' }>): boolean {
+    if (message.action !== 'update' || !message.requestId?.startsWith('item-property-')) return false;
+    if (!pending || message.requestId !== pending.requestId) return true;
+    const change = pending;
+    pending = null;
+    const item = deps.state.items.get(change.itemId);
+    if (!isEditing(change.itemId) || !item) { reset(); return true; }
+    if (!message.ok) {
+      for (let index = queued.length - 1; index >= 0; index -= 1) {
+        if (queued[index].itemId === change.itemId && queued[index].key === change.key) queued.splice(index, 1);
+      }
+      deps.updateStatus(message.message);
+      deps.sfxUiCancel();
+      sendNext();
+      return true;
+    }
+    deps.onPreviewPropertyChange?.(item, change.key, item.params[change.key] ?? deps.getItemPropertyValue(item, change.key));
+    const selectedKey = deps.state.itemPropertyKeys[deps.state.itemPropertyIndex];
+    if (deps.state.mode === 'itemProperties' && selectedKey === change.key) {
+      const value = deps.getItemPropertyValue(item, change.key);
+      const parked = item.type === 'elevator' && change.key === 'floorZs'
+        && item.params.currentZ !== change.previousStop;
+      const metadata = {
+        ...deps.getItemPropertyMetadata(item.type, change.key),
+        options: deps.getItemPropertyOptionValues(item.type, change.key),
+      };
+      announcePropertyValue(deps.updateStatus, parked ? `${value}. Car parked at height ${item.params.currentZ}.` : value, metadata);
+      deps.sfxUiBlip();
+    }
+    sendNext();
+    return true;
+  }
+
   function handleItemPropertiesModeInput(code: string, key: string): void {
     const itemId = deps.state.selectedItemId;
     if (!itemId) {
+      reset();
       deps.state.mode = 'normal';
       deps.state.editingPropertyKey = null;
       return;
     }
     const item = deps.state.items.get(itemId);
     if (!item) {
+      reset();
       deps.state.mode = 'normal';
       deps.state.editingPropertyKey = null;
       deps.updateStatus('Item no longer exists.');
@@ -92,24 +182,7 @@ export function createItemPropertyEditor(deps: EditorDeps): {
         deps.sfxUiCancel();
         return;
       }
-      const metadata = {
-        ...deps.getItemPropertyMetadata(item.type, selectedKey),
-        options: deps.getItemPropertyOptionValues(item.type, selectedKey),
-      };
-      const currentValue = metadata.valueType === 'boolean'
-        ? deps.getItemPropertyValue(item, selectedKey)
-        : item.params[selectedKey] ?? deps.getItemPropertyValue(item, selectedKey);
-      const adjustment = adjustPropertyValue(code, currentValue, metadata);
-      if (!adjustment) {
-        deps.sfxUiCancel();
-        return;
-      }
-      deps.suppressItemPropertyEchoMs(600);
-      deps.signalingSend({ type: 'item_update', itemId, params: { [selectedKey]: adjustment.value } });
-      deps.onPreviewPropertyChange?.(item, selectedKey, adjustment.value);
-      announcePropertyValue(deps.updateStatus, adjustment.value, metadata);
-      if (adjustment.hitBoundary) deps.sfxUiCancel();
-      else deps.sfxUiBlip();
+      enqueue({ itemId, key: selectedKey, code });
       return;
     }
     if (control.type === 'select') {
@@ -121,13 +194,7 @@ export function createItemPropertyEditor(deps: EditorDeps): {
       }
       const metadata = deps.getItemPropertyMetadata(item.type, selectedKey);
       if (metadata?.valueType === 'boolean') {
-        const current = deps.getItemPropertyValue(item, selectedKey).toLowerCase() === 'on';
-        const nextValue = !current;
-        deps.suppressItemPropertyEchoMs(600);
-        deps.signalingSend({ type: 'item_update', itemId, params: { [selectedKey]: nextValue } });
-        deps.onPreviewPropertyChange?.(item, selectedKey, nextValue);
-        announcePropertyValue(deps.updateStatus, nextValue, metadata);
-        deps.sfxUiBlip();
+        enqueue({ itemId, key: selectedKey, code: 'ArrowRight' });
         return;
       }
       const options = getPropertyOptions({
@@ -135,6 +202,7 @@ export function createItemPropertyEditor(deps: EditorDeps): {
         options: deps.getItemPropertyOptionValues(item.type, selectedKey),
       });
       if (options.length > 0) {
+        const selectorSession = session;
         deps.state.editingPropertyKey = selectedKey;
         deps.openOptionSelector({
           title: `Select ${deps.itemPropertyLabel(selectedKey)}`,
@@ -142,12 +210,13 @@ export function createItemPropertyEditor(deps: EditorDeps): {
           selectedId: deps.getItemPropertyValue(item, selectedKey),
           propertyHelp: () => deps.describeItemPropertyHelp(item, selectedKey),
           onSelect: (selectedValue) => {
-            deps.signalingSend({ type: 'item_update', itemId, params: { [selectedKey]: selectedValue } });
-            deps.onPreviewPropertyChange?.(item, selectedKey, selectedValue);
+            if (selectorSession !== session || deps.state.selectedItemId !== itemId || !deps.state.items.has(itemId)) return;
             deps.state.mode = 'itemProperties';
             deps.state.editingPropertyKey = null;
+            enqueue({ itemId, key: selectedKey, value: selectedValue });
           },
           onCancel: () => {
+            if (selectorSession !== session) return;
             deps.state.mode = 'itemProperties';
             deps.state.editingPropertyKey = null;
             deps.updateStatus('Cancelled.');
@@ -173,6 +242,7 @@ export function createItemPropertyEditor(deps: EditorDeps): {
       return;
     }
     if (control.type === 'cancel') {
+      reset();
       deps.state.mode = 'normal';
       deps.state.selectedItemId = null;
       deps.state.itemPropertyKeys = [];
@@ -187,11 +257,13 @@ export function createItemPropertyEditor(deps: EditorDeps): {
     const itemId = deps.state.selectedItemId;
     const propertyKey = deps.state.editingPropertyKey;
     if (!itemId || !propertyKey) {
+      reset();
       deps.state.mode = 'normal';
       return;
     }
     const item = deps.state.items.get(itemId);
     if (!item) {
+      reset();
       deps.state.mode = 'normal';
       deps.state.editingPropertyKey = null;
       deps.updateStatus('Item no longer exists.');
@@ -217,9 +289,8 @@ export function createItemPropertyEditor(deps: EditorDeps): {
       const metadata = deps.getItemPropertyMetadata(item.type, propertyKey);
       const valueType = metadata?.valueType;
       const sendItemParams = (params: Record<string, unknown>): void => {
-        deps.signalingSend({ type: 'item_update', itemId, params });
         for (const [key, nextValue] of Object.entries(params)) {
-          deps.onPreviewPropertyChange?.(item, key, nextValue);
+          enqueue({ itemId, key, value: nextValue as string | number | boolean });
         }
       };
       const parseToggleValue = (raw: string, field: string): { ok: true; value: boolean } | { ok: false } => {
@@ -247,7 +318,7 @@ export function createItemPropertyEditor(deps: EditorDeps): {
           deps.sfxUiCancel();
           return;
         }
-        deps.signalingSend({ type: 'item_update', itemId, title: value });
+        enqueue({ itemId, key: 'title', value });
       } else if (valueType === 'boolean') {
         const toggle = parseToggleValue(value, propertyKey);
         if (!toggle.ok) return;
@@ -297,5 +368,8 @@ export function createItemPropertyEditor(deps: EditorDeps): {
   return {
     handleItemPropertiesModeInput,
     handleItemPropertyEditModeInput,
+    reset,
+    shouldAnnounceEcho: (itemId) => pending?.itemId !== itemId,
+    handleActionResult,
   };
 }

@@ -18,7 +18,7 @@ function setup(floors = [0, 20, 40]) {
   const updateStatus = vi.fn();
   const send = vi.fn();
   const selector = createOptionSelector({ state, announceMenuEntry, updateStatus, blip: vi.fn(), cancel: vi.fn() });
-  const controls = createElevatorControls({ state, choose: selector.open, closeChoice: selector.close, send, updateStatus });
+  const controls = createElevatorControls({ state, choose: selector.open, closeChoice: selector.close, refreshChoice: selector.refresh, send, updateStatus });
   return { state, item, controls, selector, announceMenuEntry, updateStatus, send };
 }
 
@@ -65,10 +65,52 @@ describe('elevator floor controls', () => {
     item.params.targetZ = 40;
     state.player.z = 25;
     controls.open();
-    expect(announceMenuEntry).toHaveBeenLastCalledWith('Choose floor, height 25, traveling to open air, 40', 'Ground, 0, down');
+    expect(announceMenuEntry).toHaveBeenLastCalledWith('Choose floor, traveling to open air, 40', 'Ground, 0, below destination');
     selector.handleInput('ArrowDown', 'ArrowDown');
     selector.handleInput('Enter', 'Enter');
     expect(send).toHaveBeenCalledWith({ type: 'elevator_select_floor', itemId: 'car', z: 20 });
+  });
+
+  it('refreshes on departure and arrival without losing the highlighted destination', () => {
+    const { controls, item, state, selector, announceMenuEntry, send } = setup([0, 20, 40, 60]);
+    controls.open();
+    selector.handleInput('ArrowDown', 'ArrowDown');
+    selector.handleInput('ArrowDown', 'ArrowDown');
+    item.params.state = 'moving';
+    item.params.targetZ = 40;
+    state.player.z = 20;
+
+    controls.reconcile();
+
+    expect(announceMenuEntry).toHaveBeenLastCalledWith('Choose floor, traveling to open air, 40', 'open air, 60, above destination');
+    const count = announceMenuEntry.mock.calls.length;
+    state.player.z = 25;
+    controls.handleStatus({ type: 'item_elevator_status', itemId: 'car', event: 'moving', z: 25 });
+    controls.reconcile();
+    expect(announceMenuEntry).toHaveBeenCalledTimes(count);
+
+    item.params.state = 'arriving';
+    item.params.currentZ = 40;
+    item.params.targetZ = null;
+    controls.reconcile();
+    expect(announceMenuEntry).toHaveBeenLastCalledWith('Choose floor, current stop open air, 40', 'open air, 60, up');
+    controls.handleStatus({ type: 'item_elevator_status', itemId: 'car', event: 'arrived', z: 40 });
+    expect(announceMenuEntry).toHaveBeenCalledTimes(count + 1);
+    selector.handleInput('Enter', 'Enter');
+    expect(send).toHaveBeenCalledWith({ type: 'elevator_select_floor', itemId: 'car', z: 60 });
+  });
+
+  it('does not replace a newer selector when the car departs', () => {
+    const { controls, item, selector, announceMenuEntry } = setup();
+    controls.open();
+    const onSelect = vi.fn();
+    selector.open({ title: 'Other menu', options: [{ id: 'other', label: 'Other' }], onSelect, onCancel: vi.fn() });
+    item.params.state = 'moving';
+    item.params.targetZ = 40;
+    controls.reconcile();
+    expect(announceMenuEntry).toHaveBeenLastCalledWith('Other menu', 'Other');
+    selector.handleInput('Enter', 'Enter');
+    expect(onSelect).toHaveBeenCalledWith('other');
   });
 
   it('closes its list after exit and does not close another feature’s selector', () => {

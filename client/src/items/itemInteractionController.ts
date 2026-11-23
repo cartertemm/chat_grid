@@ -30,6 +30,7 @@ type ItemTargetResponse =
   | Extract<IncomingMessage, { type: 'item_hand_targets' }>;
 
 type ItemControllerDeps = {
+  onBeginProperties?: () => void;
   state: {
     mode: GameMode;
     selectionContext: SelectionContext;
@@ -233,6 +234,7 @@ export function createItemInteractionController(deps: ItemControllerDeps): {
   }
 
   function beginItemProperties(item: WorldItem, showAll = false): void {
+    deps.onBeginProperties?.();
     itemPropertiesShowAll = showAll;
     deps.state.selectedItemId = item.id;
     deps.state.mode = 'itemProperties';

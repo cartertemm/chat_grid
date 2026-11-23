@@ -79,5 +79,16 @@ export function createOptionSelector(deps: OptionSelectorDeps) {
     return true;
   }
 
-  return { open, handleInput, close };
+  /** Refresh an owned list while retaining its highlighted option when available. */
+  function refresh(active: OptionSelectorRequest, next: OptionSelectorRequest): boolean {
+    if (request !== active || deps.state.mode !== 'optionSelect' || next.options.length === 0) return false;
+    const selectedId = request.options[index].id;
+    const nextIndex = next.options.findIndex((entry) => entry.id === selectedId);
+    index = nextIndex >= 0 ? nextIndex : Math.min(index, next.options.length - 1);
+    request = next;
+    deps.announceMenuEntry(next.title, next.options[index].label);
+    return true;
+  }
+
+  return { open, handleInput, close, refresh };
 }

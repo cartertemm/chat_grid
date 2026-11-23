@@ -372,6 +372,7 @@ export const itemActionResultSchema = z.object({
   action: z.enum(['add', 'duplicate', 'pickup', 'drop', 'delete', 'transfer', 'hand', 'use', 'secondary_use', 'update']),
   message: z.string(),
   itemId: z.string().optional(),
+  requestId: z.string().nullish(),
 });
 
 const itemTargetSummarySchema = z.object({
@@ -719,6 +720,7 @@ export type OutgoingMessage =
   | {
       type: 'item_update';
       itemId: string;
+      requestId?: string;
       title?: string;
       params?: Record<string, unknown>;
     };

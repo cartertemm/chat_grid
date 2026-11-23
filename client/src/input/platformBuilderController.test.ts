@@ -14,12 +14,13 @@ function setup() {
   const back = vi.fn();
   const openConfirmation = vi.fn();
   const openOptionSelector = vi.fn();
+  const cancel = vi.fn();
   const controller = createPlatformBuilderController({
     state, hasPermission: () => true, send, updateStatus, announceMenuEntry: vi.fn(),
-    blip: vi.fn(), confirm: vi.fn(), cancel: vi.fn(), applyTextInputEdit: vi.fn(),
+    blip: vi.fn(), confirm: vi.fn(), cancel, applyTextInputEdit: vi.fn(),
     setReplaceTextOnNextType: vi.fn(), openOptionSelector, openConfirmation,
   }, back);
-  return { controller, state, send, updateStatus, back, openConfirmation, openOptionSelector };
+  return { controller, state, send, updateStatus, back, openConfirmation, openOptionSelector, cancel };
 }
 
 describe('platform coordinate editing', () => {
@@ -213,7 +214,7 @@ describe('platform coordinate editing', () => {
     expect(updateStatus).toHaveBeenLastCalledWith('-3');
   });
 
-  it('discards queued adjustment presses on rejection or changing properties', () => {
+  it('discards queued adjustment presses on rejection', () => {
     const { controller, send } = setup();
     controller.openList();
     controller.handleList('ArrowDown', 'ArrowDown');
@@ -224,9 +225,94 @@ describe('platform coordinate editing', () => {
     controller.handleActionResult({ ok: false, requestId: send.mock.lastCall![0].requestId, message: 'Would strand an item.' });
     expect(send).toHaveBeenCalledTimes(1);
     controller.handleActions('ArrowLeft', 'ArrowLeft');
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it('preserves adjustment order across rows and only speaks the selected property', () => {
+    const { controller, state, send, updateStatus } = setup();
+    controller.openList();
+    controller.handleList('ArrowDown', 'ArrowDown');
+    controller.handleList('Enter', 'Enter');
+    controller.handleActions('ArrowDown', 'ArrowDown');
+    controller.handleActions('ArrowLeft', 'ArrowLeft');
     controller.handleActions('ArrowLeft', 'ArrowLeft');
     controller.handleActions('ArrowDown', 'ArrowDown');
+    controller.handleActions('ArrowLeft', 'ArrowLeft');
+    controller.handleActions('ArrowLeft', 'ArrowLeft');
+    updateStatus.mockClear();
+
+    for (const [property, value] of [['startX', -1], ['startX', -2], ['startY', -1], ['startY', -2]] as const) {
+      expect(send.mock.lastCall![0]).toMatchObject({ [property]: value });
+      state.platforms.set('ground', { ...state.platforms.get('ground')!, [property]: value });
+      controller.handleActionResult({ ok: true, requestId: send.mock.lastCall![0].requestId, platformId: 'ground', message: '' });
+    }
+
+    expect(send).toHaveBeenCalledTimes(4);
+    expect(updateStatus.mock.calls).toEqual([['-1'], ['-2']]);
+  });
+
+  it('drops the rejected property steps and continues edits to other properties', () => {
+    const { controller, state, send, updateStatus } = setup();
+    controller.openList();
+    controller.handleList('ArrowDown', 'ArrowDown');
+    controller.handleList('Enter', 'Enter');
+    controller.handleActions('ArrowDown', 'ArrowDown');
+    controller.handleActions('ArrowLeft', 'ArrowLeft');
+    controller.handleActions('ArrowLeft', 'ArrowLeft');
+    controller.handleActions('ArrowDown', 'ArrowDown');
+    controller.handleActions('ArrowLeft', 'ArrowLeft');
+    controller.handleActions('ArrowUp', 'ArrowUp');
+    controller.handleActions('ArrowLeft', 'ArrowLeft');
+    controller.handleActions('ArrowDown', 'ArrowDown');
+
+    controller.handleActionResult({ ok: false, requestId: send.mock.lastCall![0].requestId, message: 'Would strand an item.' });
+    expect(updateStatus).toHaveBeenLastCalledWith('Would strand an item.');
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.lastCall![0]).toMatchObject({ startY: -1 });
+    state.platforms.set('ground', { ...state.platforms.get('ground')!, startY: -1 });
     controller.handleActionResult({ ok: true, requestId: send.mock.lastCall![0].requestId, platformId: 'ground', message: '' });
     expect(send).toHaveBeenCalledTimes(2);
+    expect(updateStatus).toHaveBeenLastCalledWith('-1');
+  });
+
+  it('silently skips a queued boundary on a property the user has left', () => {
+    const { controller, state, send, cancel } = setup();
+    state.platforms.set('ground', { ...state.platforms.get('ground')!, startX: -999999 });
+    controller.openList();
+    controller.handleList('ArrowDown', 'ArrowDown');
+    controller.handleList('Enter', 'Enter');
+    controller.handleActions('ArrowDown', 'ArrowDown');
+    controller.handleActions('ArrowLeft', 'ArrowLeft');
+    controller.handleActions('ArrowLeft', 'ArrowLeft');
+    controller.handleActions('ArrowDown', 'ArrowDown');
+    controller.handleActions('ArrowLeft', 'ArrowLeft');
+
+    state.platforms.set('ground', { ...state.platforms.get('ground')!, startX: -1000000 });
+    controller.handleActionResult({ ok: true, requestId: send.mock.lastCall![0].requestId, platformId: 'ground', message: '' });
+    expect(cancel).not.toHaveBeenCalled();
+    expect(send.mock.lastCall![0]).toMatchObject({ startY: -1 });
+  });
+
+  it('calculates a queued property adjustment from the normalized server bounds', () => {
+    const { controller, state, send, updateStatus } = setup();
+    controller.openList();
+    controller.handleList('ArrowDown', 'ArrowDown');
+    controller.handleList('Enter', 'Enter');
+    controller.handleActions('ArrowDown', 'ArrowDown');
+    controller.handleActions('Enter', 'Enter');
+    state.nicknameInput = '100';
+    controller.handleEdit('Enter', 'Enter');
+    controller.handleActions('ArrowDown', 'ArrowDown');
+    controller.handleActions('ArrowDown', 'ArrowDown');
+    controller.handleActions('ArrowRight', 'ArrowRight');
+    updateStatus.mockClear();
+
+    state.platforms.set('ground', { ...state.platforms.get('ground')!, startX: 40, endX: 100 });
+    controller.handleActionResult({ ok: true, requestId: send.mock.lastCall![0].requestId, platformId: 'ground', message: '' });
+    expect(send.mock.lastCall![0]).toMatchObject({ endX: 101 });
+    expect(updateStatus).not.toHaveBeenCalled();
+    state.platforms.set('ground', { ...state.platforms.get('ground')!, endX: 101 });
+    controller.handleActionResult({ ok: true, requestId: send.mock.lastCall![0].requestId, platformId: 'ground', message: '' });
+    expect(updateStatus).toHaveBeenLastCalledWith('101');
   });
 });
