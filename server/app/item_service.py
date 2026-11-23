@@ -12,6 +12,8 @@ from pathlib import Path
 from .client import ClientConnection
 from .item_catalog import get_item_definition
 from .item_geometry import item_bounds, move_item, validate_item_bounds
+from .elevator_geometry import parse_stops, validate_shaft_support
+from .items.types.elevator.validator import validate_update as validate_elevator_update
 from .models import PersistedWorldItem, WorldItem
 from .platform_service import PlatformService
 from .state_files import read_state_text, set_aside_unreadable, write_json_atomic
@@ -204,30 +206,23 @@ class ItemService:
                 ],
             )
             if item.type == "elevator":
-                for timing_key in ("doorOpenSeconds", "travelSeconds"):
-                    item.params.setdefault(
-                        timing_key, item_def.default_params[timing_key]
-                    )
-                configured_floor_zs = item.params.get("floorZs", [0, 40])
-                floor_zs = {
-                    int(floor_z)
-                    for floor_z in configured_floor_zs
-                    if isinstance(floor_z, int)
-                }
+                item.params = validate_elevator_update(item, item.params)
+                floor_zs = parse_stops(item.params["floorZs"])
                 current_z = int(item.params.get("currentZ", 0))
                 if current_z not in floor_zs:
-                    current_z = min(floor_zs, default=0)
-                item.z = 0
+                    current_z = min(floor_zs, key=lambda z: (abs(z - current_z), z))
+                item.z = min(floor_zs)
                 item.params.update(
                     {
                         "currentZ": current_z,
                         "targetZ": None,
-                        "queuedZ": None,
-                        "departOnCloseZ": None,
+                        "requestedZs": [],
                         "state": "idle",
                         "doorOpen": False,
                     }
                 )
+                if self.geometry is not None:
+                    validate_shaft_support(item, self.geometry)
             elif item.carrierId is not None:
                 item.carrierId = None
                 geometry = self.geometry or PlatformService(state_file=None)

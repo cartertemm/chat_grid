@@ -255,42 +255,43 @@ Radio retains its stream, volume, effects, range, and facing controls; it has no
 ## `elevator`
 
 ### Defaults
-- Title: `Elevator`
-- Floors: ground at `z=0`, second at `z=40`
-- Footprint: one square, present at the same coordinate on both landings
-- Fully open dwell: editable `doorOpenSeconds`, default 5 seconds
-- Door transition sounds: `/sounds/elevator_open.ogg` (about 2.56 seconds) and `/sounds/elevator_close.ogg` (about 3.77 seconds)
-- Floor travel time: editable `travelSeconds`, default 5 seconds
-- Built-in interior ambience: `/sounds/elevator_inside.ogg`
-- Emitter defaults: nondirectional at facing `0`, range `15`, volume `100`, normal speed/tempo, no delays, effect off, and empty sound
-- Door-open direction cue: `/sounds/elevator_up.ogg` for the next upward trip or `/sounds/elevator_down.ogg` for the next downward trip
+
+- Title `Elevator`.
+- Stops `0,40`, exposed as a comma-delimited list in the shared item editor.
+- Creating an elevator at another elevation includes that elevation in its initial stops and parks the car there. The builder can then edit Stops through the normal item editor.
+- Footprint of one square at the same X/Y on each stop.
+- Fully open dwell `doorOpenSeconds=5`.
+- Vertical travel speed `speed=10` Z units per second.
+- Door sounds `/sounds/elevator_open.ogg` and `/sounds/elevator_close.ogg`, plus built-in `/sounds/elevator_inside.ogg` cabin ambience.
+- Emitter defaults remain nondirectional at facing zero, range 15, volume 100, normal speed/tempo, no delays, effect off and an empty sound.
 
 ### Use
-- Use once to call the car or open its door when it is already present.
-- Opening and closing are non-traversable phases. Use again only after the opening sound finishes to enter. With two floors, entering selects the other floor.
-- The fully open door closes after the configured `doorOpenSeconds` from the latest completed opening or entry. This dwell starts after the opening sound. The car starts its configured `travelSeconds` trip only after the closing sound finishes.
-- On arrival, the next-direction beep and opening sound begin together. Once opening finishes, riders join the destination floor, receive a floor-and-door announcement, and the interior ambience becomes audible outside nearby.
-- Use once after arrival to exit through the fully open door. If the configured dwell expires first, one use starts reopening it; use again after opening finishes to exit.
-- Secondary use reports the current landing and door state, or the destination and travel direction while moving.
-- Away-floor calls made while the car is moving or a door is transitioning are queued.
+
+- Enter calls the car or opens its door when present. Board or exit after the opening sound finishes.
+- A two-stop elevator automatically selects the other stop when boarded.
+- Boarding an elevator with three or more stops opens the shared destination selector. Up/Down browse stops, Enter requests one, and Escape dismisses the selector while remaining aboard. Choose floor in Commands or touch controls reopens it.
+- Rider destinations and outside calls enter one queue in acceptance order. Duplicate destinations are coalesced, and the current trip finishes before the next request is served.
+- The door closes after its open dwell, then travel starts when the closing sound finishes. Trip time is distance divided by speed.
+- Secondary use reports the current stop, door state, destination and travel direction.
+- Riders remain aboard on arrival. Exiting into open air lands on the highest platform below the shaft X/Y, even if its elevation is absent from Stops. If there is no platform below, the rider remains aboard.
 
 ### Rules
-- Each placed elevator has its own car and state machine; multiple elevators are allowed.
-- Elevators cannot be carried. They cannot be deleted while moving or occupied.
-- Riders cannot move or teleport while inside.
-- During travel, rider `z` advances progressively between the two floors. Every intermediate height is hidden from both floors and blocks all floor audio.
-- The built-in interior ambience loops from a randomized offset. Passengers hear it throughout their time inside; nearby users hear it spatially only while the door is fully open on their landing.
-- A configured emitted sound stays on the elevator shaft object and emits from its anchor on both floors. A rider can hear it normally while the door is open; it is suppressed only while that rider is inside with the door closed.
+
+- Each elevator has its own car, queue and riders. Riders cannot walk or teleport while inside.
+- At least one configured stop must have platform support at the shaft X/Y so people can board. Other stops may open into air. Platform edits preserve that boardable stop.
+- Stops can be changed while the car is idle, empty and has no pending calls. Omitting its old parked elevation parks the car closed at the nearest new stop.
+- Moving and occupied elevators cannot be deleted.
+- Riders and their carried items move together while traveling or exiting. Cabin audio stays isolated during travel and connects to landing audio through the door transmission ramp.
+- Restart clears transient trips, queues and door timers and parks the car closed at its last completed stop. Forced player recovery uses a supported landing below that location or the world fallback.
 
 ### Validation
-- `doorOpenSeconds`, `travelSeconds`: number `0..300`, rounded to 0.1 seconds
-- `directional`: boolean; `facing`: degrees `0..360`
-- `emitRange`: integer `1..20`
-- `emitVolume`: integer `0..100`
-- `emitSoundSpeed`, `emitSoundTempo`, `emitEffectValue`: number `0..100`
-- `emitInitialDelay`, `emitLoopDelay`: seconds `0..300`
-- `emitEffect`: `reverb | echo | flanger | high_pass | low_pass | off`
-- `emitSound`: empty, filename (assumed under `sounds/`), or full URL
+
+- `floorZs` accepts 2 through 100 distinct signed integer elevations, each between -1,000,000 and 1,000,000, and stores them in ascending order.
+- `doorOpenSeconds` accepts 0 through 300 seconds in tenths.
+- `speed` accepts 0.1 through 1,000 Z units per second in tenths.
+- `directional` is boolean and `facing` accepts 0 through 360 degrees.
+- `emitRange` accepts 1 through 20, `emitVolume` accepts 0 through 100, and standard sound speed, tempo and effect controls apply.
+- `emitSound` accepts an empty value, a sound filename, or a full URL.
 
 ## Adding A New Item Type (Plugin Discovery)
 

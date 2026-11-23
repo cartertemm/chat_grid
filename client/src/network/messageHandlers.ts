@@ -10,6 +10,7 @@ import { worldItemAcousticZoneId } from '../audio/acousticZones';
  * Dependency contract for creating a message handler without hard-coupling to `main.ts`.
  */
 type MessageHandlerDeps = {
+  handleElevatorStatus?: (message: Extract<IncomingMessage, { type: 'item_elevator_status' }>) => void;
   getWorldGridSize: () => number;
   setWorldGridSize: (size: number) => void;
   setStructurePresets: (presets: StructurePreset[]) => void;
@@ -413,7 +414,10 @@ export function createOnMessageHandler(deps: MessageHandlerDeps): (message: Inco
             value !== deps.getItemPropertyValue(previousItem, key) &&
             deps.shouldAnnounceItemPropertyEcho()
           ) {
-            announcePropertyValue(deps.updateStatus, value);
+            const parkedZ = message.item.type === 'elevator' && key === 'floorZs'
+              && previousItem.params.currentZ !== message.item.params.currentZ
+              ? message.item.params.currentZ : undefined;
+            announcePropertyValue(deps.updateStatus, parkedZ === undefined ? value : `${value}. Car parked at height ${parkedZ}.`);
           }
         }
         await deps.refreshAudioSubscriptions(true);
@@ -426,6 +430,7 @@ export function createOnMessageHandler(deps: MessageHandlerDeps): (message: Inco
         if (message.message) {
           deps.updateStatus(message.message);
         }
+        deps.handleElevatorStatus?.(message);
         if (previousElevatorItemId !== deps.state.elevatorItemId) {
           deps.refreshAcousticModel();
           await deps.refreshAudioSubscriptions(true);
@@ -476,10 +481,11 @@ export function createOnMessageHandler(deps: MessageHandlerDeps): (message: Inco
         if (!soundUrl) break;
         const item = deps.state.items.get(message.itemId);
         const listener = deps.state.player;
-        const position = item && !item.carrierId
+        const useItemPosition = item && !item.carrierId && item.type !== 'elevator';
+        const position = useItemPosition
           ? resolveWorldItemSourcePosition(item, listener.z, listener.x, listener.y)
           : message;
-        const acousticZoneId = item && !item.carrierId
+        const acousticZoneId = useItemPosition
           ? worldItemAcousticZoneId(item, listener.acousticZoneId, deps.state.items)
           : message.acousticZoneId;
         deps.playWorldSound(soundUrl, { ...message, ...position, acousticZoneId });

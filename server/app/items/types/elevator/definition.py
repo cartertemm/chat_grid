@@ -5,11 +5,12 @@ from __future__ import annotations
 from ...emit_validation import EMIT_EFFECT_OPTIONS
 
 LABEL = "elevator"
-TOOLTIP = "A two-floor elevator with a shared shaft and timed doors."
+TOOLTIP = "An elevator with configurable stops, a shared shaft and timed doors."
 EDITABLE_PROPERTIES: tuple[str, ...] = (
     "title",
+    "floorZs",
     "doorOpenSeconds",
-    "travelSeconds",
+    "speed",
     "directional",
     "facing",
     "emitRange",
@@ -34,12 +35,11 @@ DEFAULT_PARAMS: dict = {
     "floorZs": [0, 40],
     "currentZ": 0,
     "targetZ": None,
-    "queuedZ": None,
-    "departOnCloseZ": None,
+    "requestedZs": [],
     "state": "idle",
     "doorOpen": False,
     "doorOpenSeconds": 5,
-    "travelSeconds": 5,
+    "speed": 10,
     "directional": False,
     "facing": 0,
     "emitRange": 15,
@@ -56,12 +56,11 @@ PARAM_KEYS: tuple[str, ...] = (
     "floorZs",
     "currentZ",
     "targetZ",
-    "queuedZ",
-    "departOnCloseZ",
+    "requestedZs",
     "state",
     "doorOpen",
     "doorOpenSeconds",
-    "travelSeconds",
+    "speed",
     "directional",
     "facing",
     "emitRange",
@@ -88,23 +87,19 @@ PROPERTY_METADATA: dict[str, dict[str, object]] = {
     },
     "floorZs": {
         "valueType": "text",
-        "label": "Floors",
-        "tooltip": "Floor elevations served by this elevator.",
+        "label": "Stops",
+        "tooltip": "Comma-delimited stop elevations, for example 0,40. Use at least two distinct signed integers.",
+        "maxLength": 1000,
     },
     "targetZ": {
         "valueType": "text",
         "label": "Target Z",
         "tooltip": "Destination elevation while the elevator is moving.",
     },
-    "queuedZ": {
+    "requestedZs": {
         "valueType": "text",
-        "label": "Queued Z",
-        "tooltip": "Landing elevation waiting for the current trip to finish.",
-    },
-    "departOnCloseZ": {
-        "valueType": "text",
-        "label": "Departure Z",
-        "tooltip": "Destination elevation selected when the open door closes.",
+        "label": "Queued stops",
+        "tooltip": "Requested stops waiting for the current trip to finish.",
     },
     "state": {
         "valueType": "text",
@@ -122,11 +117,11 @@ PROPERTY_METADATA: dict[str, dict[str, object]] = {
         "tooltip": "Seconds the door remains fully open after its opening sound finishes.",
         "range": {"min": 0, "max": 300, "step": 0.1},
     },
-    "travelSeconds": {
+    "speed": {
         "valueType": "number",
-        "label": "Travel seconds",
-        "tooltip": "Seconds the car takes to reach the other floor after its closing sound finishes.",
-        "range": {"min": 0, "max": 300, "step": 0.1},
+        "label": "Speed",
+        "tooltip": "Vertical Z units traveled per second.",
+        "range": {"min": 0.1, "max": 1000, "step": 0.1},
     },
     "directional": {
         "valueType": "boolean",

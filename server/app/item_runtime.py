@@ -22,6 +22,7 @@ from .item_catalog import (
 )
 from .item_service import ItemService
 from .item_geometry import END_COORDINATES, item_bounds, move_item, validate_item_bounds
+from .elevator_geometry import parse_stops, validate_shaft_support
 from .platform_service import PlatformService
 from .item_type_handlers import get_item_type_handler
 from .items.types.clock.runtime import ClockRuntime
@@ -49,6 +50,7 @@ from .models import (
     ItemPianoRecordingPacket,
     ItemPickupPacket,
     ItemRemovePacket,
+    ElevatorSelectFloorPacket,
     ItemSecondaryUsePacket,
     ItemTransferPacket,
     ItemTransferTargetSummary,
@@ -142,6 +144,8 @@ class ItemRuntime:
                 find_carried_items=self.item_service.find_carried_items,
                 now_ms=self.item_service.now_ms,
                 floor_name=self.floor_name,
+                landing_position=self.host.platform_service.landing_position,
+                fallback_spawn=self.host.platform_service.spawn,
                 get_emit_range=self.get_emit_range,
             )
         )
@@ -330,6 +334,17 @@ class ItemRuntime:
         if isinstance(packet, ItemSecondaryUsePacket):
             await self._handle_secondary_use(client, packet)
             return True
+        if isinstance(packet, ElevatorSelectFloorPacket):
+            item = self.items.get(packet.itemId)
+            if not self.client_has_permission(client, "item.use"):
+                await self.send_result(
+                    client, False, "use", "Not authorized to use items."
+                )
+            elif item is None or item.type != "elevator":
+                await self.send_result(client, False, "use", "Elevator not found.")
+            else:
+                await self.elevator.select_floor(client, item, packet.z)
+            return True
         if isinstance(packet, ItemPianoNotePacket):
             await self._handle_piano_note(client, packet)
             return True
@@ -369,7 +384,9 @@ class ItemRuntime:
         ):
             item.params["destination"] = f"{client.x}, {client.y}, {client.z}"
         if item.type == "elevator":
-            item.z = 0
+            stops = sorted({*item.params["floorZs"], client.z})
+            item.params["floorZs"] = stops
+            item.z = min(stops)
             item.params["currentZ"] = client.z
         if not self._item_footprint_in_bounds(item):
             await self.send_result(
@@ -393,10 +410,12 @@ class ItemRuntime:
             item.z,
         )
         item_text = f"{item.title} ({self._item_type_label(item)})"
+        placed_z = item.params["currentZ"] if item.type == "elevator" else item.z
+        location = f"{item.x}, {item.y}, {placed_z}, {self.floor_name(item.x, item.y, placed_z)}"
         await self.delivery.broadcast(
             BroadcastChatMessagePacket(
                 type="chat_message",
-                message=f"{client.nickname} placed {item_text} at {item.x}, {item.y}, {item.z}, {self.floor_name(item.x, item.y, item.z)}.",
+                message=f"{client.nickname} placed {item_text} at {location}.",
                 system=True,
             ),
             exclude=client,
@@ -405,7 +424,7 @@ class ItemRuntime:
             client,
             True,
             "add",
-            f"You placed {item_text} at {item.x}, {item.y}, {item.z}, {self.floor_name(item.x, item.y, item.z)}.",
+            f"You placed {item_text} at {location}.",
             item.id,
         )
         return
@@ -453,12 +472,12 @@ class ItemRuntime:
         if item.type == "radio_station":
             item.params.update(stationName="", nowPlaying="")
         if item.type == "elevator":
-            item.z = 0
+            stops = parse_stops(item.params["floorZs"])
+            item.z = min(stops)
             item.params.update(
-                currentZ=client.z,
+                currentZ=min(stops, key=lambda z: (abs(z - client.z), z)),
                 targetZ=None,
-                queuedZ=None,
-                departOnCloseZ=None,
+                requestedZs=[],
                 state="idle",
                 doorOpen=False,
             )
@@ -1145,6 +1164,15 @@ class ItemRuntime:
             )
             return
         if use_item.type == "elevator":
+            if client.elevator_id not in (None, use_item.id):
+                await self.send_result(
+                    client,
+                    False,
+                    "use",
+                    "Exit your current elevator first.",
+                    use_item.id,
+                )
+                return
             await self.elevator.use(client, use_item)
             return
         handler = get_item_type_handler(use_item.type)
@@ -1314,6 +1342,15 @@ class ItemRuntime:
                 secondary_item.id,
             )
             return
+        if secondary_item.type == "elevator":
+            await self.send_result(
+                client,
+                True,
+                "secondary_use",
+                self.elevator.status(secondary_item),
+                secondary_item.id,
+            )
+            return
         handler = get_item_type_handler(secondary_item.type)
         if handler.secondary_use is None:
             await self.send_result(
@@ -1438,6 +1475,11 @@ class ItemRuntime:
             )
             return
         current_item = update_item
+        previous_stop = (
+            int(update_item.params["currentZ"])
+            if update_item.type == "elevator"
+            else None
+        )
         update_item = current_item.model_copy(deep=True)
         if packet.title is not None:
             title = packet.title.strip()
@@ -1481,6 +1523,29 @@ class ItemRuntime:
             handler = get_item_type_handler(update_item.type)
             try:
                 next_params = handler.validate_update(update_item, next_params)
+                if (
+                    update_item.type == "elevator"
+                    and next_params["floorZs"] != current_item.params["floorZs"]
+                ):
+                    if (
+                        current_item.params.get("state") != "idle"
+                        or current_item.params.get("requestedZs")
+                        or any(
+                            other.elevator_id == current_item.id
+                            for other in self.clients.values()
+                        )
+                    ):
+                        raise ValueError(
+                            "Stops can only be changed while the elevator is idle, empty, and has no pending calls."
+                        )
+                    current_z = int(current_item.params["currentZ"])
+                    next_params["currentZ"] = min(
+                        next_params["floorZs"], key=lambda z: (abs(z - current_z), z)
+                    )
+                    next_params["doorOpen"] = False
+                    update_item.params = next_params
+                    update_item.z = min(next_params["floorZs"])
+                    validate_shaft_support(update_item, self.host.platform_service)
                 if update_item.type == "teleporter":
                     error = self.teleport_destination_error(
                         parse_destination(next_params.get("destination"))
@@ -1495,6 +1560,13 @@ class ItemRuntime:
             update_item.params = next_params
         current_item.title = update_item.title
         current_item.params = update_item.params
+        if current_item.type == "elevator":
+            current_item.z = update_item.z
+            self.item_service.resting_positions[current_item.id] = (
+                current_item.x,
+                current_item.y,
+                current_item.z,
+            )
         for field in END_COORDINATES:
             setattr(current_item, field, getattr(update_item, field))
         if current_item.carrierId and edits_bounds:
@@ -1511,9 +1583,13 @@ class ItemRuntime:
         update_item.version += 1
         await self.broadcast_item(update_item)
         self.request_state_save()
-        await self.send_result(
-            client, True, "update", f"Updated {update_item.title}.", update_item.id
-        )
+        result_message = f"Updated {update_item.title}."
+        if (
+            previous_stop is not None
+            and previous_stop != update_item.params["currentZ"]
+        ):
+            result_message += f" Car parked at height {update_item.params['currentZ']}."
+        await self.send_result(client, True, "update", result_message, update_item.id)
         return
 
     @staticmethod
@@ -1709,6 +1785,9 @@ class ItemRuntime:
 
         try:
             validate_item_bounds(item)
+            if item.type == "elevator":
+                validate_shaft_support(item, self.host.platform_service)
+                return True
         except ValueError:
             return False
         bounds = item_bounds(item)

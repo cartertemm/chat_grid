@@ -9,6 +9,18 @@ from app.world_restore import reconcile_world_restore
 
 
 @pytest.mark.asyncio
+async def test_restore_releases_midair_rider_to_highest_platform_below(world):
+    rider = world.join("Rider", x=5, y=6, z=63, elevator_id="old-car", facing_deg=135)
+
+    await reconcile_world_restore(world.server)
+
+    assert rider.elevator_id is None
+    assert (rider.x, rider.y, rider.z, rider.facing_deg) == (5, 6, 40, 135)
+    position = world.transport.last_packet_of_type(rider, BroadcastPositionPacket)
+    assert position.acousticZoneId == "floor:40"
+
+
+@pytest.mark.asyncio
 async def test_restore_cancels_old_work_before_it_runs_and_releases_riders(world):
     server = world.server
     rider = world.join("Rider", x=3, y=4, z=40, elevator_id="removed-car")

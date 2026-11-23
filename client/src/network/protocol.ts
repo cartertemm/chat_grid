@@ -652,6 +652,7 @@ export type DoorAction = {
   pinRequiredFor?: 'lock' | 'unlock' | 'both'; unlockTimeoutSeconds?: number;
 };
 export type OutgoingMessage =
+  | { type: 'elevator_select_floor'; itemId: string; z: number }
   | DoorAction
   | { type: 'checkpoint_action'; action: 'capture' | 'list' | 'preview' | 'restore'; requestId?: string; label?: string; checkpointId?: string; page?: number; worldRevision?: string }
   | { type: 'auth_register'; username: string; password: string; email?: string }
