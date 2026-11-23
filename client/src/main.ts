@@ -265,7 +265,7 @@ const dom: Dom = {
 
 type ChangelogSection = {
   date: string;
-  items: string[];
+  items: Array<string | { text: string; thanks: string }>;
 };
 
 type ChangelogData = {
@@ -803,7 +803,14 @@ function renderChangelog(changelog: ChangelogData): void {
     const list = document.createElement('ul');
     for (const item of section.items) {
       const li = document.createElement('li');
-      li.textContent = item;
+      if (typeof item === 'string') {
+        li.textContent = item;
+      } else {
+        const profile = document.createElement('a');
+        profile.href = `https://github.com/${encodeURIComponent(item.thanks)}`;
+        profile.textContent = `@${item.thanks}`;
+        li.append(item.text, ' Thanks ', profile, '.');
+      }
       list.appendChild(li);
     }
     dom.updatesPanel.appendChild(list);
