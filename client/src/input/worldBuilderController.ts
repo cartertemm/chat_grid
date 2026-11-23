@@ -16,6 +16,7 @@ import {
   validateNumericPropertyInput,
   type PropertyControlMetadata,
 } from './propertyControls';
+import { createCheckpointController } from './checkpointController';
 import { createRegionBuilderController } from './regionBuilderController';
 import { createAmbianceBuilderController } from './ambianceBuilderController';
 import type { AmbianceType } from '../state/gameState';
@@ -45,6 +46,7 @@ const ROOT_ACTIONS = [
   { id: 'editAmbiances', label: 'Edit ambiances', tooltip: 'Choose an ambiance on this floor to resize, edit, or delete.' },
   { id: 'addRegion', label: 'Add region', tooltip: 'Create a one-square named region at your current position.' },
   { id: 'editRegions', label: 'Edit regions', tooltip: 'Choose a named region on this floor to edit.' },
+  { id: 'checkpoints', label: 'World checkpoints', tooltip: 'Save the authored world, preview checkpoints, or restore one.' },
 ] as const;
 const DIRECTIONS = [
   { id: 'north', label: 'North', tooltip: 'Place the wall along the north edge of your current square.' },
@@ -140,6 +142,7 @@ export function createWorldBuilderController(deps: WorldBuilderDeps) {
       deps.send({ type: 'structure_update_wall', structureId: wall.id, [property]: value });
     }
   }
+  const checkpointController = createCheckpointController(deps, open);
   const regionBuilderController = createRegionBuilderController(deps, open);
   const ambianceBuilderController = createAmbianceBuilderController({
     ...deps,
@@ -203,15 +206,21 @@ export function createWorldBuilderController(deps: WorldBuilderDeps) {
     });
   }
 
+  function rootActions() {
+    return ROOT_ACTIONS.filter((entry) => entry.id === 'checkpoints'
+      ? deps.hasPermission('world.checkpoint.capture') || deps.hasPermission('world.checkpoint.view')
+      : deps.hasPermission('world.structure.edit'));
+  }
+
   function open(): void {
-    if (!deps.hasPermission('world.structure.edit')) {
+    if (!rootActions().length) {
       deps.updateStatus('World Builder permission required.');
       deps.cancel();
       return;
     }
     index = 0;
     deps.state.mode = 'worldBuilder';
-    deps.announceMenuEntry('World Builder', ROOT_ACTIONS[index].label);
+    deps.announceMenuEntry('World Builder', rootActions()[index].label);
   }
 
   function openWallActions(wall: WallStructure): void {
@@ -260,7 +269,9 @@ export function createWorldBuilderController(deps: WorldBuilderDeps) {
   }
 
   function handleRoot(code: string, key: string): void {
-    handleList(code, key, ROOT_ACTIONS, (entry) => {
+    index = Math.min(index, Math.max(0, rootActions().length - 1));
+    handleList(code, key, rootActions(), (entry) => {
+      if (entry === 'checkpoints') { checkpointController.open(); return; }
       if (entry === 'addRegion') {
         regionBuilderController.requestAdd();
         return;
@@ -553,6 +564,8 @@ export function createWorldBuilderController(deps: WorldBuilderDeps) {
     },
     open,
     handleRoot,
+    handleCheckpointInput: checkpointController.handleInput,
+    handleCheckpointResult: checkpointController.result,
     handlePreset,
     handleDirection,
     handleWallList,

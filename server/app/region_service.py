@@ -133,15 +133,32 @@ class RegionService:
         del self.regions[region_id]
         return region
 
+    def dump_state(self) -> list[dict]:
+        """Encode the durable dataset used by live saves and checkpoints."""
+
+        return [region.model_dump(mode="json") for region in self.regions.values()]
+
+    def restore_state(self, raw: object) -> None:
+        """Validate a complete dataset before replacing the live map."""
+
+        if not isinstance(raw, list):
+            raise RegionError("Region state must be a list.")
+        loaded: dict[str, NamedRegion] = {}
+        for entry in raw:
+            region = NamedRegion.model_validate(entry)
+            self._validate_region(region)
+            if region.id in loaded:
+                raise RegionError(f"Duplicate region id: {region.id}")
+            loaded[region.id] = region
+        self.regions = loaded
+
     def save_state(self) -> None:
         """Atomically persist all regions to the configured state file."""
 
         if self.state_file is None:
             return
         try:
-            payload = [
-                region.model_dump(mode="json") for region in self.regions.values()
-            ]
+            payload = self.dump_state()
             write_json_atomic(self.state_file, payload)
         except Exception as exc:
             LOGGER.warning("failed to persist regions to %s: %s", self.state_file, exc)
@@ -156,17 +173,8 @@ class RegionService:
             if text is None:
                 return
             raw = json.loads(text)
-            if not isinstance(raw, list):
-                raise RegionError("Region state must be a list.")
-            loaded: dict[str, NamedRegion] = {}
-            for entry in raw:
-                region = NamedRegion.model_validate(entry)
-                self._validate_region(region)
-                if region.id in loaded:
-                    raise RegionError(f"Duplicate region id: {region.id}")
-                loaded[region.id] = region
-            self.regions = loaded
-            LOGGER.info("loaded %d regions from %s", len(loaded), self.state_file)
+            self.restore_state(raw)
+            LOGGER.info("loaded %d regions from %s", len(self.regions), self.state_file)
         except Exception as exc:
             if not set_aside_unreadable(self.state_file, exc):
                 self.state_file = None

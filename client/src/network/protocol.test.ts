@@ -2,6 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { incomingMessageSchema } from './protocol';
 
 describe('item target protocol messages', () => {
+  it('parses checkpoint previews with the revision required for a safe restore', () => {
+    const packet = { type: 'checkpoint_result', action: 'preview', ok: true, message: '', preview: {
+      checkpoint: { id: 'saved', label: 'Before remodel', createdAt: 1, createdBy: 'Builder', counts: { items: 3 } },
+      worldRevision: 'revision', changes: { items: { added: 1, removed: 2, modified: 0 } }, warnings: [],
+    } };
+    expect(incomingMessageSchema.parse(packet)).toMatchObject(packet);
+    expect(incomingMessageSchema.safeParse({ ...packet, preview: { ...packet.preview, worldRevision: undefined } }).success).toBe(false);
+  });
+
   it('parses transfer and hand target responses as distinct message types', () => {
     const transfer = incomingMessageSchema.parse({
       type: 'item_transfer_targets',

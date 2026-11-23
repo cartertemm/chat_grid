@@ -90,7 +90,7 @@ async def test_state_save_requests_are_debounced(
     def fake_save_state() -> None:
         save_calls.append("saved")
 
-    monkeypatch.setattr(server.item_service, "save_state", fake_save_state)
+    monkeypatch.setattr(server.world_store, "save", fake_save_state)
 
     server._request_state_save()
     server._request_state_save()

@@ -246,15 +246,32 @@ class AmbianceService:
         del self.ambiances[ambiance_id]
         return region
 
+    def dump_state(self) -> list[dict]:
+        """Encode the durable dataset used by live saves and checkpoints."""
+
+        return [region.model_dump(mode="json") for region in self.ambiances.values()]
+
+    def restore_state(self, raw: object) -> None:
+        """Validate a complete dataset before replacing the live map."""
+
+        if not isinstance(raw, list):
+            raise AmbianceError("Ambiance state must be a list.")
+        loaded: dict[str, AmbianceRegion] = {}
+        for entry in raw:
+            region = AmbianceRegion.model_validate(entry)
+            self._validate_region(region)
+            if region.id in loaded:
+                raise AmbianceError(f"Duplicate ambiance id: {region.id}")
+            loaded[region.id] = region
+        self.ambiances = loaded
+
     def save_state(self) -> None:
         """Atomically persist all regions to the configured state file."""
 
         if self.state_file is None:
             return
         try:
-            payload = [
-                region.model_dump(mode="json") for region in self.ambiances.values()
-            ]
+            payload = self.dump_state()
             write_json_atomic(self.state_file, payload)
         except Exception as exc:
             LOGGER.warning(
@@ -271,17 +288,10 @@ class AmbianceService:
             if text is None:
                 return
             raw = json.loads(text)
-            if not isinstance(raw, list):
-                raise AmbianceError("Ambiance state must be a list.")
-            loaded: dict[str, AmbianceRegion] = {}
-            for entry in raw:
-                region = AmbianceRegion.model_validate(entry)
-                self._validate_region(region)
-                if region.id in loaded:
-                    raise AmbianceError(f"Duplicate ambiance id: {region.id}")
-                loaded[region.id] = region
-            self.ambiances = loaded
-            LOGGER.info("loaded %d ambiances from %s", len(loaded), self.state_file)
+            self.restore_state(raw)
+            LOGGER.info(
+                "loaded %d ambiances from %s", len(self.ambiances), self.state_file
+            )
         except Exception as exc:
             if not set_aside_unreadable(self.state_file, exc):
                 self.state_file = None

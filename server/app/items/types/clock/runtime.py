@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable
 from datetime import datetime
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
+from ....runtime_tasks import cancel_and_join
 from ....delivery import Delivery
 from ....item_catalog import CLOCK_DEFAULT_TIME_ZONE, CLOCK_TIME_ZONE_OPTIONS
 from ....items.types.clock.time_format import parse_alarm_time_flexible
@@ -52,14 +54,14 @@ class ClockRuntime:
         if self._task is None or self._task.done():
             self._task = asyncio.create_task(self._run_clock_top_of_hour_loop())
 
-    async def shutdown(self) -> None:
+    def shutdown(self) -> Awaitable[None]:
         """Cancel and await scheduled clock announcement polling."""
 
-        if self._task is None:
-            return
-        self._task.cancel()
-        await asyncio.gather(self._task, return_exceptions=True)
+        task = self._task
         self._task = None
+        self._alarm_markers.clear()
+        self._top_of_hour_markers.clear()
+        return cancel_and_join([task] if task is not None else [])
 
     @classmethod
     def _build_clock_time_sounds(cls, params: dict) -> list[str]:

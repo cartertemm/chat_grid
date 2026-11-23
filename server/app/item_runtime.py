@@ -97,6 +97,7 @@ class ItemRuntime:
     def __init__(self, host: ItemRuntimeHost) -> None:
         """Compose generic and type-specific item runtimes."""
 
+        self.running = False
         self.host = host
         self.delivery = host.delivery
         self.item_last_use_ms: dict[str, int] = {}
@@ -163,17 +164,22 @@ class ItemRuntime:
     def start(self) -> None:
         """Start all item background runtimes."""
 
+        self.running = True
         self.radio.start()
         self.clock.start()
 
     async def shutdown(self) -> None:
         """Stop all item tasks owned by generic and type-specific runtimes."""
 
-        await self.teleport.shutdown()
-        await self.piano.shutdown()
-        await self.elevator.shutdown()
-        await self.clock.shutdown()
-        await self.radio.shutdown()
+        self.running = False
+        self.item_last_use_ms.clear()
+        await asyncio.gather(
+            self.teleport.shutdown(),
+            self.piano.shutdown(),
+            self.elevator.shutdown(),
+            self.clock.shutdown(),
+            self.radio.shutdown(),
+        )
 
     async def prepare_client_disconnect(self, client: ClientConnection) -> None:
         """Release per-client item runtime state before position persistence."""

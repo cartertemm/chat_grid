@@ -58,6 +58,22 @@ function setupRemoteMovement() {
 }
 
 describe('item property update announcements', () => {
+  it('replaces the authored world after a restore and drops stale selection', async () => {
+    const { handler, state } = setupRemoteMovement();
+    state.mode = 'itemProperties';
+    state.selectedItemId = 'gone';
+    state.itemPropertyKeys = ['title'];
+    state.elevatorItemId = 'gone';
+    state.regions.set('gone', { id: 'gone', name: 'Removed', floorZ: 0, startX: 0, startY: 0, endX: 0, endY: 0 });
+    await handler(incomingMessageSchema.parse({ type: 'world_restored', items: [], structures: [], ambiances: [], regions: [{ id: 'new', name: 'Studio', floorZ: 0, startX: 1, startY: 1, endX: 2, endY: 2 }] }));
+    expect([...state.regions.keys()]).toEqual(['new']);
+    expect(state.selectedItemId).toBeNull();
+    expect(state.itemPropertyKeys).toEqual([]);
+    expect(state.elevatorItemId).toBeNull();
+    expect(state.mode).toBe('normal');
+    expect(state.peers.has('peer-1')).toBe(true);
+  });
+
   function selectedItem(): WorldItem {
     return {
       id: 'radio', type: 'radio_station', title: 'Studio radio',

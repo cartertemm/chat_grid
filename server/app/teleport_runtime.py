@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Literal, TypeAlias
 
+from .runtime_tasks import cancel_and_join
 from .acoustic_zones import client_position_packet
 from .client import ClientConnection
 from .delivery import Delivery
@@ -137,16 +138,13 @@ class TeleportRuntime:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
 
-    async def shutdown(self) -> None:
+    def shutdown(self) -> Awaitable[None]:
         """Cancel and await every active transition task."""
 
         tasks = list(self._tasks.values())
-        for task in tasks:
-            task.cancel()
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
         self._tasks.clear()
         self._active.clear()
+        return cancel_and_join(tasks)
 
     async def _run(self, state: _ActiveTeleport) -> None:
         """Advance one transition through midpoint and completion phases."""

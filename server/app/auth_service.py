@@ -49,6 +49,9 @@ PERMISSIONS: tuple[str, ...] = (
     "server.manage_settings",
     "server.allow_reboot",
     "world.structure.edit",
+    "world.checkpoint.capture",
+    "world.checkpoint.view",
+    "world.checkpoint.restore",
 )
 
 PERMISSION_DESCRIPTIONS: dict[str, str] = {
@@ -73,6 +76,9 @@ PERMISSION_DESCRIPTIONS: dict[str, str] = {
     "server.manage_settings": "Allow changing server settings.",
     "server.allow_reboot": "Allow scheduling a server reboot from chat command.",
     "world.structure.edit": "Allow live editing of World Builder structures.",
+    "world.checkpoint.capture": "Allow saving a durable checkpoint of the authored world.",
+    "world.checkpoint.view": "Allow browsing and previewing world checkpoints.",
+    "world.checkpoint.restore": "Allow replacing the shared authored world from a checkpoint.",
 }
 
 DEFAULT_ROLE_PERMISSIONS: dict[str, set[str]] = {

@@ -385,6 +385,17 @@ class RegionDeletePacket(BasePacket):
     regionId: str
 
 
+class CheckpointActionPacket(BasePacket):
+    """Request durable capture, paged browsing, preview, or confirmed restore."""
+
+    type: Literal["checkpoint_action"]
+    action: Literal["capture", "list", "preview", "restore"]
+    label: str = Field(default="", max_length=100)
+    checkpointId: str | None = Field(default=None, min_length=1, max_length=100)
+    page: int = Field(default=0, ge=0, le=100000)
+    worldRevision: str | None = Field(default=None, min_length=1, max_length=128)
+
+
 ClientPacket = (
     UpdatePositionPacket
     | UpdateFacingPacket
@@ -439,6 +450,7 @@ ClientPacket = (
     | RegionResizePacket
     | RegionSlidePacket
     | RegionDeletePacket
+    | CheckpointActionPacket
 )
 
 
@@ -943,3 +955,53 @@ class RegionActionResultPacket(BasePacket):
     action: Literal["add", "update", "resize", "slide", "delete"]
     message: str
     regionId: str | None = None
+
+
+class CheckpointSummary(BaseModel):
+    """Public immutable checkpoint metadata, excluding authored-world secrets."""
+
+    id: str
+    label: str
+    createdAt: int
+    createdBy: str
+    counts: dict[str, int]
+
+
+class CheckpointChangeCounts(BaseModel):
+    """Number of additions, removals, and modifications in one dataset."""
+
+    added: int
+    removed: int
+    modified: int
+
+
+class CheckpointPreview(BaseModel):
+    """Validated comparison tied to the current durable authored-world state."""
+
+    checkpoint: CheckpointSummary
+    worldRevision: str
+    changes: dict[str, CheckpointChangeCounts]
+    warnings: list[str]
+
+
+class CheckpointResultPacket(BasePacket):
+    """Report a checkpoint operation without exposing checkpoint payloads."""
+
+    type: Literal["checkpoint_result"]
+    action: Literal["capture", "list", "preview", "restore"]
+    ok: bool
+    message: str
+    checkpoints: list[CheckpointSummary] | None = None
+    page: int | None = None
+    hasNext: bool | None = None
+    preview: CheckpointPreview | None = None
+
+
+class WorldRestoredPacket(BasePacket):
+    """Replace the client's authored world following a successful restore."""
+
+    type: Literal["world_restored"]
+    items: list[dict]
+    structures: list[dict]
+    regions: list[dict]
+    ambiances: list[dict]
