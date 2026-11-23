@@ -247,6 +247,7 @@ class SignalingServer:
         max_items_per_user: int = 500,
         rate_limits: RateLimitsConfigSection | None = None,
         ambiance_sounds_dir: Path | None = None,
+        footstep_sounds_dir: Path | None = None,
     ):
         """Initialize runtime state, TLS context, and item service."""
 
@@ -292,6 +293,7 @@ class SignalingServer:
         self.platform_service = PlatformService(
             state_file=state_file.with_name("platforms.json") if state_file else None,
             grid_size=self.grid_size,
+            sounds_dir=footstep_sounds_dir,
         )
         self.item_service = ItemService(
             state_file=state_file, geometry=self.platform_service
@@ -1200,6 +1202,9 @@ class SignalingServer:
                 ],
                 "structurePresets": self.structure_service.preset_snapshot(),
                 "ambianceTypes": self.ambiance_service.ambiance_type_snapshot(),
+                "footstepSets": [
+                    entry.model_dump() for entry in self.platform_service.footstep_sets
+                ],
             },
             uiDefinitions=self._build_ui_definitions(client),
             serverInfo={
@@ -1920,6 +1925,22 @@ class SignalingServer:
                 ),
             )
             relocated = []
+            removed_support = previous is not None and (
+                removed
+                or platform.z != previous.z
+                or platform.startX > previous.startX
+                or platform.startY > previous.startY
+                or platform.endX < previous.endX
+                or platform.endY < previous.endY
+            )
+            retained_players = [
+                occupant
+                for occupant in self.clients.values()
+                if removed_support
+                and previous is not None
+                and previous.contains(occupant.x, occupant.y, occupant.z)
+                and self.platform_service.contains(occupant.x, occupant.y, occupant.z)
+            ]
             if previous is not None and relocate_players:
                 destination = self.platform_service.spawn()
                 for occupant in self.clients.values():
@@ -1941,6 +1962,10 @@ class SignalingServer:
                 else PlatformUpsertPacket(type="platform_upsert", platform=platform)
             )
             await self.delivery.broadcast(broadcast)
+            # A client may cancel list travel after this geometry change even
+            # when its authoritative standing cell still exists.
+            for occupant in retained_players:
+                await self.delivery.send(occupant, client_position_packet(occupant))
             for occupant in relocated:
                 await self.delivery.broadcast(client_position_packet(occupant))
                 await self.item_runtime.sync_carried_items(occupant)

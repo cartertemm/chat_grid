@@ -1451,8 +1451,10 @@ class ItemRuntime:
                 )
                 return
             update_item.title = title[:80]
+        edits_bounds = False
         if packet.params:
             incoming_params = dict(packet.params)
+            edits_bounds = any(field in incoming_params for field in END_COORDINATES)
             try:
                 for field in END_COORDINATES:
                     if field in incoming_params:
@@ -1466,8 +1468,7 @@ class ItemRuntime:
                                 "Ending coordinates must be whole numbers."
                             )
                         setattr(update_item, field, endpoint)
-                validate_item_bounds(update_item)
-                if not self._item_footprint_in_bounds(update_item):
+                if edits_bounds and not self._item_footprint_in_bounds(update_item):
                     raise ValueError(
                         "The item footprint does not fit on the platforms."
                     )
@@ -1496,6 +1497,12 @@ class ItemRuntime:
         current_item.params = update_item.params
         for field in END_COORDINATES:
             setattr(current_item, field, getattr(update_item, field))
+        if current_item.carrierId and edits_bounds:
+            self.item_service.resting_positions[current_item.id] = (
+                current_item.x,
+                current_item.y,
+                current_item.z,
+            )
         update_item = current_item
         update_item.updatedAt = self.item_service.now_ms()
         actor_id, actor_name = self._item_updated_actor(client)

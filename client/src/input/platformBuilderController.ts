@@ -1,10 +1,10 @@
-import type { Platform } from '../state/platformGeometry';
+import type { FootstepSet, Platform } from '../state/platformGeometry';
 import type { WorldBuilderDeps } from './worldBuilderController';
 import { handleMenuRowKey } from './listController';
 import { getEditSessionAction } from './editSession';
 import { coordinateMetadata, parseCoordinate } from './coordinateControls';
 import type { MobileTextEntry } from './mobileController';
-import { adjustPropertyValue, announcePropertyValue, applyNumericPropertyKey, describePropertyHelp, formatPropertyRow } from './propertyControls';
+import { adjustPropertyValue, announcePropertyValue, applyNumericPropertyKey, describePropertyHelp, formatPropertyRow, formatPropertyValue, getPropertyOptions } from './propertyControls';
 
 const PROPERTIES = [
   { id: 'name', label: 'Name', tooltip: 'Name this platform.' },
@@ -13,6 +13,7 @@ const PROPERTIES = [
   { id: 'endX', label: 'End X', tooltip: 'Set the east corner coordinate.' },
   { id: 'endY', label: 'End Y', tooltip: 'Set the north corner coordinate.' },
   { id: 'z', label: 'Elevation', tooltip: 'Set the height of this flat platform.' },
+  { id: 'footstepSet', label: 'Footsteps', tooltip: 'Choose the footstep sounds heard when someone walks on this platform.' },
 ] as const;
 type Property = typeof PROPERTIES[number]['id'];
 type PlatformDraft = Omit<Platform, 'id'>;
@@ -28,6 +29,7 @@ export function createPlatformBuilderController(deps: WorldBuilderDeps, back: ()
   let pending: { kind: 'add' | 'update' | 'delete'; requestId: string; session: number; platformId?: string; property?: Property; value?: string | number } | null = null;
   const queuedSteps: string[] = [];
   let platforms: Platform[] = [];
+  let footstepSets: FootstepSet[] = [{ id: 'default', title: 'Default', urls: [] }];
 
   function reset(): void {
     session += 1;
@@ -60,6 +62,10 @@ export function createPlatformBuilderController(deps: WorldBuilderDeps, back: ()
 
   function metadata(property: Property) {
     const entry = PROPERTIES.find((row) => row.id === property)!;
+    if (property === 'footstepSet') return {
+      valueType: 'list', tooltip: entry.tooltip,
+      options: footstepSets.map((set) => ({ id: set.id, label: set.title })),
+    };
     return property === 'name' ? { valueType: 'text', tooltip: entry.tooltip, maxLength: 100 }
       : coordinateMetadata(`${entry.tooltip} Enter a signed integer. Opposite corners are normalized when saved.`);
   }
@@ -67,10 +73,14 @@ export function createPlatformBuilderController(deps: WorldBuilderDeps, back: ()
   function entries() {
     const platform = current();
     return [
-      ...PROPERTIES.map((entry) => ({ ...entry, label: platform ? formatPropertyRow(entry.label, platform[entry.id]) : entry.label })),
+      ...PROPERTIES.map((entry) => ({ ...entry, label: platform ? formatPropertyRow(entry.label, formatPropertyValue(propertyValue(platform, entry.id), metadata(entry.id))) : entry.label })),
       draft ? { id: 'create', label: 'Create platform', tooltip: 'Validate these coordinates and add the platform.' }
         : { id: 'delete', label: 'Delete platform', tooltip: 'Delete this platform after confirmation. People move to 0, 0, 0, or the lowest corner of the first remaining platform. Required item support and a remaining platform are needed.' },
     ];
+  }
+
+  function propertyValue(platform: PlatformDraft, property: Property): string | number {
+    return platform[property] ?? 'default';
   }
 
   function openActions(): void {
@@ -122,7 +132,7 @@ export function createPlatformBuilderController(deps: WorldBuilderDeps, back: ()
         const player = deps.state.player;
         const x = Math.round(player.x);
         const y = Math.round(player.y);
-        draft = { name: 'Platform', startX: x, startY: y, endX: x, endY: y, z: player.z };
+        draft = { name: 'Platform', startX: x, startY: y, endX: x, endY: y, z: player.z, footstepSet: 'default' };
         selectedId = null;
       } else selectedId = rows[index].id;
       index = 0;
@@ -146,13 +156,13 @@ export function createPlatformBuilderController(deps: WorldBuilderDeps, back: ()
     const code = queuedSteps.shift();
     const platform = current();
     if (!code || !platform) return;
-    const adjustment = adjustPropertyValue(code, platform[property], metadata(property));
+    const adjustment = adjustPropertyValue(code, propertyValue(platform, property), metadata(property));
     if (!adjustment || adjustment.hitBoundary) {
       queuedSteps.length = 0;
       deps.cancel();
       return;
     }
-    setProperty(property, adjustment.value as number);
+    setProperty(property, adjustment.value as string | number);
   }
 
   function handleActions(code: string, key: string): void {
@@ -162,12 +172,12 @@ export function createPlatformBuilderController(deps: WorldBuilderDeps, back: ()
     const rows = entries();
     const property = PROPERTIES[index]?.id;
     if (property) {
-      const adjustment = adjustPropertyValue(code, platform[property], metadata(property));
+      const adjustment = adjustPropertyValue(code, propertyValue(platform, property), metadata(property));
       if (adjustment) {
         if (pending) {
           if (pending.kind === 'update' && pending.property === property) queuedSteps.push(code);
         } else if (adjustment.hitBoundary) deps.cancel();
-        else setProperty(property, adjustment.value as number);
+        else setProperty(property, adjustment.value as string | number);
         return;
       }
     }
@@ -183,6 +193,24 @@ export function createPlatformBuilderController(deps: WorldBuilderDeps, back: ()
     else if (control.type === 'select') {
       if (pending) return;
       if (property) {
+        if (property === 'footstepSet') {
+          const selectorSession = session;
+          deps.openOptionSelector({
+            title: 'Footsteps',
+            options: getPropertyOptions(metadata(property)),
+            selectedId: String(propertyValue(platform, property)),
+            propertyHelp: () => describePropertyHelp('Footsteps', metadata(property), true),
+            onSelect: (value) => {
+              if (selectorSession !== session || !allowed()) return;
+              deps.state.mode = 'worldBuilderPlatformActions';
+              setProperty(property, value);
+            },
+            onCancel: () => {
+              if (selectorSession === session) openActions();
+            },
+          });
+          return;
+        }
         editing = property;
         deps.state.nicknameInput = String(platform[property]);
         deps.state.cursorPos = deps.state.nicknameInput.length;
@@ -238,6 +266,9 @@ export function createPlatformBuilderController(deps: WorldBuilderDeps, back: ()
 
   return {
     openList, handleList, handleActions, handleEdit, reset, reconcileWorld,
+    setFootstepSets(next: FootstepSet[]) {
+      footstepSets = next.length ? next : [{ id: 'default', title: 'Default', urls: [] }];
+    },
     getEditingMaxLength: () => editing === 'name' ? 100 : 8,
     getTextEntry: (): MobileTextEntry => ({
       label: PROPERTIES.find((entry) => entry.id === editing)!.label,

@@ -1,5 +1,5 @@
 import { type IncomingMessage } from './protocol';
-import { legacyPlatforms, type Platform } from '../state/platformGeometry';
+import { legacyPlatforms, type FootstepSet, type Platform } from '../state/platformGeometry';
 import { getFacingDirection, type NamedRegion, type AmbianceRegion, type AmbianceType, type StructurePreset, type WallStructure, type WorldItem } from '../state/gameState';
 import { WORLD_FOOTSTEP_GAIN, type WorldSoundSource } from '../audio/worldAudio';
 import { announcePropertyValue } from '../input/propertyControls';
@@ -14,6 +14,7 @@ type MessageHandlerDeps = {
   setWorldGridSize: (size: number) => void;
   setStructurePresets: (presets: StructurePreset[]) => void;
   setAmbianceTypes: (types: AmbianceType[]) => void;
+  setFootstepSets?: (sets: FootstepSet[]) => void;
   refreshStructureGeometry: () => void;
   setMovementTickMs: (value: number) => void;
   setConnecting: (value: boolean) => void;
@@ -55,7 +56,7 @@ type MessageHandlerDeps = {
   applyAudioLayerState: () => Promise<void>;
   gameLoop: () => void;
   sanitizeName: (value: string) => string;
-  randomFootstepUrl: () => string;
+  randomFootstepUrl: (x: number, y: number, z: number) => string;
   playWorldSound: (url: string, source: WorldSoundSource) => void;
   playWorldSoundSequence: (urls: string[], source: WorldSoundSource) => void;
   handleItemActionResultStatus: (message: Extract<IncomingMessage, { type: 'item_action_result' }>) => boolean;
@@ -206,6 +207,7 @@ export function createOnMessageHandler(deps: MessageHandlerDeps): (message: Inco
         deps.state.platforms = new Map(platforms.map((p) => [p.id, p]));
         deps.setStructurePresets(message.worldConfig?.structurePresets ?? []);
         deps.setAmbianceTypes(message.worldConfig?.ambianceTypes ?? []);
+        deps.setFootstepSets?.(message.worldConfig?.footstepSets ?? []);
         deps.rendererSetGridSize(deps.getWorldGridSize());
         const schemaReady = deps.applyServerItemUiDefinitions(message.uiDefinitions);
         if (!schemaReady) {
@@ -310,7 +312,7 @@ export function createOnMessageHandler(deps: MessageHandlerDeps): (message: Inco
         if (peer) {
           const movementDelta = Math.hypot(message.x - prevX, message.y - prevY);
           if (movementDelta > 0 && movementDelta <= 1.5) {
-            deps.playWorldSound(deps.randomFootstepUrl(), {
+            deps.playWorldSound(deps.randomFootstepUrl(peer.x, peer.y, peer.z), {
               x: peer.x,
               y: peer.y,
               z: peer.z,

@@ -13,15 +13,45 @@ function setup() {
   const updateStatus = vi.fn();
   const back = vi.fn();
   const openConfirmation = vi.fn();
+  const openOptionSelector = vi.fn();
   const controller = createPlatformBuilderController({
     state, hasPermission: () => true, send, updateStatus, announceMenuEntry: vi.fn(),
     blip: vi.fn(), confirm: vi.fn(), cancel: vi.fn(), applyTextInputEdit: vi.fn(),
-    setReplaceTextOnNextType: vi.fn(), openOptionSelector: vi.fn(), openConfirmation,
+    setReplaceTextOnNextType: vi.fn(), openOptionSelector, openConfirmation,
   }, back);
-  return { controller, state, send, updateStatus, back, openConfirmation };
+  return { controller, state, send, updateStatus, back, openConfirmation, openOptionSelector };
 }
 
 describe('platform coordinate editing', () => {
+  it('uses shared footstep choices and announces only the accepted sound set', () => {
+    const { controller, state, send, updateStatus, openOptionSelector } = setup();
+    controller.setFootstepSets([
+      { id: 'default', title: 'Default', urls: ['/sounds/steps/default/step-1.ogg'] },
+      { id: 'wood', title: 'Wood', urls: ['/sounds/steps/wood/step-1.ogg'] },
+    ]);
+    controller.openList();
+    controller.handleList('ArrowDown', 'ArrowDown');
+    controller.handleList('Enter', 'Enter');
+    for (let i = 0; i < 6; i++) controller.handleActions('ArrowDown', 'ArrowDown');
+    expect(updateStatus).toHaveBeenLastCalledWith('Footsteps: Default');
+    controller.handleActions('Space', ' ');
+    expect(updateStatus.mock.lastCall?.[0]).toContain('Choose the footstep sounds');
+    updateStatus.mockClear();
+    controller.handleActions('ArrowRight', 'ArrowRight');
+    expect(send.mock.lastCall?.[0]).toMatchObject({ type: 'platform_update', footstepSet: 'wood' });
+    expect(updateStatus).not.toHaveBeenCalled();
+    state.platforms.set('ground', { ...state.platforms.get('ground')!, footstepSet: 'wood' });
+    controller.handleActionResult({ ok: true, requestId: send.mock.lastCall![0].requestId, platformId: 'ground', message: '' });
+    expect(updateStatus).toHaveBeenLastCalledWith('Wood');
+    controller.handleActions('Enter', 'Enter');
+    const selector = openOptionSelector.mock.lastCall![0];
+    expect(selector).toMatchObject({ title: 'Footsteps', selectedId: 'wood' });
+    expect(selector.options).toEqual([{ id: 'default', label: 'Default' }, { id: 'wood', label: 'Wood' }]);
+    selector.onSelect('default');
+    expect(send.mock.lastCall?.[0]).toMatchObject({ type: 'platform_update', footstepSet: 'default' });
+    expect(state.mode).toBe('worldBuilderPlatformActions');
+  });
+
   it('keeps a new island in a draft until explicitly created and accepts signed coordinates', () => {
     const { controller, state, send, updateStatus } = setup();
     controller.openList();
@@ -34,7 +64,7 @@ describe('platform coordinate editing', () => {
     expect(state.mode).toBe('worldBuilderPlatformActions');
     expect(updateStatus).toHaveBeenLastCalledWith('-100');
     expect(send).not.toHaveBeenCalled();
-    for (let i = 0; i < 5; i++) controller.handleActions('ArrowDown', 'ArrowDown');
+    for (let i = 0; i < 6; i++) controller.handleActions('ArrowDown', 'ArrowDown');
     controller.handleActions('Enter', 'Enter');
     expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: 'platform_add', name: 'Platform', startX: -100, startY: 0, endX: 0, endY: 0, z: 0 }));
   });
@@ -78,7 +108,7 @@ describe('platform coordinate editing', () => {
     controller.openList();
     controller.handleList('ArrowDown', 'ArrowDown');
     controller.handleList('Enter', 'Enter');
-    for (let i = 0; i < 6; i++) controller.handleActions('ArrowDown', 'ArrowDown');
+    for (let i = 0; i < 7; i++) controller.handleActions('ArrowDown', 'ArrowDown');
     controller.handleActions('Enter', 'Enter');
     expect(send).not.toHaveBeenCalled();
     expect(openConfirmation).toHaveBeenCalledWith(expect.objectContaining({
@@ -92,7 +122,7 @@ describe('platform coordinate editing', () => {
     const { controller, state, send, updateStatus } = setup();
     controller.openList();
     controller.handleList('Enter', 'Enter');
-    for (let i = 0; i < 6; i++) controller.handleActions('ArrowDown', 'ArrowDown');
+    for (let i = 0; i < 7; i++) controller.handleActions('ArrowDown', 'ArrowDown');
     controller.handleActions('Enter', 'Enter');
     const oldRequestId = send.mock.lastCall![0].requestId;
     controller.handleActions('Escape', 'Escape');

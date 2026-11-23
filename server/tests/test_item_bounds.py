@@ -99,6 +99,50 @@ def test_point_records_keep_single_cell_and_move_optional_endpoints(world):
 
 
 @pytest.mark.asyncio
+async def test_carried_widget_resize_refreshes_resting_support(world):
+    actor = world.join("owner", x=40, y=40)
+    server = world.server
+    service = server.item_service
+    item = service.default_item(actor, "widget")
+    service.add_item(item)
+    assert (await action(world, actor, {"type": "item_pickup", "itemId": item.id})).ok
+    actor.x, actor.y = 10, 10
+    await server.item_runtime.sync_carried_items(actor)
+    assert (
+        await action(
+            world,
+            actor,
+            {"type": "item_update", "itemId": item.id, "params": {"endX": 12}},
+        )
+    ).ok
+    assert service.resting_positions[item.id] == (10, 10, 0)
+    await server._handle_message(
+        actor, json.dumps({"type": "platform_delete", "platformId": "second-floor"})
+    )
+    assert "second-floor" not in server.platform_service.platforms
+
+
+@pytest.mark.asyncio
+async def test_carried_widget_can_edit_settings_when_base_overhangs(world):
+    actor = world.join("owner", x=10, y=10)
+    service = world.server.item_service
+    item = service.default_item(actor, "widget")
+    item.endX = 12
+    service.add_item(item)
+    assert (await action(world, actor, {"type": "item_pickup", "itemId": item.id})).ok
+    actor.x, actor.y = 40, 40
+    await world.server.item_runtime.sync_carried_items(actor)
+    result = await action(
+        world,
+        actor,
+        {"type": "item_update", "itemId": item.id, "params": {"enabled": False}},
+    )
+    assert result.ok
+    assert item.params["enabled"] is False
+    assert service.resting_positions[item.id] == (10, 10, 0)
+
+
+@pytest.mark.asyncio
 async def test_bounds_keep_ownership_and_fixed_type_validation(world):
     owner = world.join("owner")
     visitor = world.join("visitor", permissions={"item.edit.own"})

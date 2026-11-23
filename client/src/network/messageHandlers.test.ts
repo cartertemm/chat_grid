@@ -30,7 +30,7 @@ function setupRemoteMovement() {
     state,
     peerManager,
     refreshAcousticModel: vi.fn(),
-    randomFootstepUrl: () => '/sounds/step-1.ogg',
+    randomFootstepUrl: (x: number, y: number, z: number) => (x === 5 && y === 4 && z === 0 ? '/sounds/steps/bridge/plank.ogg' : '/sounds/steps/default/step-1.ogg'),
     playWorldSound,
     updateStatus,
     pushChatMessage,
@@ -201,7 +201,7 @@ describe('remote movement audio', () => {
       acousticZoneId: 'floor:0',
     });
 
-    expect(playWorldSound).toHaveBeenCalledWith('/sounds/step-1.ogg', {
+    expect(playWorldSound).toHaveBeenCalledWith('/sounds/steps/bridge/plank.ogg', {
       x: 5,
       y: 4,
       z: 0,

@@ -159,7 +159,47 @@ async def test_shrink_moves_only_users_who_lose_support(world, floor, expected):
     assert (displaced.x, displaced.y, displaced.z) == expected
     for viewer in (builder, displaced):
         updates = world.transport.packets_of_type(viewer, BroadcastPositionPacket)
-        assert [packet.id for packet in updates] == [displaced.id]
+        expected_ids = (
+            {builder.id, displaced.id} if viewer is builder else {displaced.id}
+        )
+        assert {packet.id for packet in updates} == expected_ids
+    retained_position = next(
+        packet
+        for packet in world.transport.packets_of_type(builder, BroadcastPositionPacket)
+        if packet.id == builder.id
+    )
+    assert (retained_position.x, retained_position.y, retained_position.z) == (
+        5,
+        4,
+        floor,
+    )
+
+
+@pytest.mark.asyncio
+async def test_resize_resynchronizes_retained_player_after_list_travel_is_cancelled(
+    world,
+):
+    builder = world.join("Builder", x=20, y=4)
+    traveller = world.join("Traveller", x=10, y=4)
+    await world.server._handle_message(
+        builder,
+        json.dumps(dict(type="platform_update", platformId="ground", startX=5)),
+    )
+    # The traveller's original animation started at x=1, which no longer exists.
+    # Its browser cancels at a fractional x while its server cell remains valid.
+    position = next(
+        packet
+        for packet in world.transport.packets_of_type(
+            traveller, BroadcastPositionPacket
+        )
+        if packet.id == traveller.id
+    )
+    assert (position.x, position.y, position.z) == (10, 4, 0)
+    await world.server._handle_message(
+        traveller,
+        json.dumps(dict(type="update_position", x=11, y=4, z=0)),
+    )
+    assert (traveller.x, traveller.y, traveller.z) == (11, 4, 0)
 
 
 @pytest.mark.asyncio

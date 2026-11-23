@@ -58,6 +58,8 @@ import { SignalingClient } from './network/signalingClient';
 import { nextHeartbeatState } from './network/reconnectPolicy';
 import { CanvasRenderer } from './render/canvasRenderer';
 import { canWalkTo, nearestLanding, platformAt } from './state/platformGeometry';
+import type { FootstepSet } from './state/platformGeometry';
+import { footstepSample } from './audio/footsteps';
 import {
   GRID_SIZE,
   MOVE_COOLDOWN_MS,
@@ -322,7 +324,7 @@ const AUTH_SESSION_COOKIE_SET_URL = withBase('auth/session/set');
 const AUTH_SESSION_COOKIE_CLEAR_URL = withBase('auth/session/clear');
 const AUTH_SESSION_COOKIE_CLIENT_HEADER = 'X-Chgrid-Auth-Client';
 const ACTION_SOUND_URL = withBase('sounds/action.ogg');
-const FOOTSTEP_SOUND_URLS = Array.from({ length: 11 }, (_, index) => withBase(`sounds/step-${index + 1}.ogg`));
+let footstepSets: FootstepSet[] = [];
 const TELEPORT_START_SOUND_URL = withBase('sounds/teleport_start.ogg');
 const TELEPORT_START_GAIN = 0.1;
 const TELEPORT_SOUND_URL = withBase('sounds/teleport.ogg');
@@ -1363,8 +1365,8 @@ function formatCoordinate(value: number): string {
 }
 
 /** Picks one random footstep sample URL. */
-function randomFootstepUrl(): string {
-  return FOOTSTEP_SOUND_URLS[Math.floor(Math.random() * FOOTSTEP_SOUND_URLS.length)];
+function randomFootstepUrl(x: number, y: number, z: number): string {
+  return resolveIncomingSoundUrl(footstepSample(footstepSets, platformAt(state.platforms, x, y, z)?.footstepSet));
 }
 
 /** Stops active teleport loop audio, if one is running. */
@@ -1575,7 +1577,7 @@ function handleMovement(): void {
   lastWallCollisionDirection = null;
   state.player.lastMoveTime = now;
   void refreshAudioSubscriptions(true);
-  void audio.playSample(randomFootstepUrl(), WORLD_FOOTSTEP_GAIN, movementTickMs);
+  void audio.playSample(randomFootstepUrl(nextX, nextY, state.player.z), WORLD_FOOTSTEP_GAIN, movementTickMs);
   signaling.send({ type: 'update_position', x: nextX, y: nextY, z: state.player.z });
 
   const namesOnTile = getPeerNamesAtPosition(nextX, nextY);
@@ -1890,6 +1892,10 @@ const onAppMessage = createOnMessageHandler({
     ambianceRuntime.setTypes(types.map((type) => ({ ...type, url: resolveIncomingSoundUrl(type.url) })));
     worldBuilderController.setAmbianceTypes(types);
   },
+  setFootstepSets: (sets) => {
+    footstepSets = sets;
+    worldBuilderController.setFootstepSets(sets);
+  },
   refreshStructureGeometry: () => {
     wallEdgeIndex = buildWallEdgeIndex(state.structures.values());
   },
@@ -1978,6 +1984,8 @@ const onAppMessage = createOnMessageHandler({
     const originSupported = platformAt(state.platforms, activeTeleport.startX, activeTeleport.startY, state.player.z);
     const targetSupported = platformAt(state.platforms, activeTeleport.targetX, activeTeleport.targetY, state.player.z);
     if (originSupported && targetSupported) return;
+    state.player.x = activeTeleport.lastSentX;
+    state.player.y = activeTeleport.lastSentY;
     activeTeleport = null;
     activeTeleportLoopToken += 1;
     stopTeleportLoopAudio();

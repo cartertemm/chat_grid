@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from functools import cached_property
 import json
 from bisect import bisect_right
 from pathlib import Path
 import uuid
 
-from .models import Platform
+from .models import FootstepSet, Platform
+from .footstep_sets import default_footstep_sounds_dir, discover_footstep_sets
 from .state_files import read_state_text, write_json_atomic
 
 MAX_PLATFORMS = 1000
@@ -21,10 +23,17 @@ class PlatformError(ValueError):
 class PlatformService:
     """Own nonoverlapping flat rectangles and compact walkability queries."""
 
-    def __init__(self, *, state_file: Path | None, grid_size: int = 41) -> None:
+    def __init__(
+        self,
+        *,
+        state_file: Path | None,
+        grid_size: int = 41,
+        sounds_dir: Path | None = None,
+    ) -> None:
         """Load saved geometry or seed the legacy layout on first startup."""
         self.state_file = state_file
         self.grid_size = grid_size
+        self._sounds_dir = sounds_dir
         self.platforms = {
             key: Platform(
                 id=key,
@@ -58,6 +67,11 @@ class PlatformService:
                 raise PlatformError(
                     "Saved platform geometry is unreadable. Repair it before starting the world."
                 ) from exc
+
+    @cached_property
+    def footstep_sets(self) -> list[FootstepSet]:
+        """Read installed sounds once for live use, skipping geometry-only staging."""
+        return discover_footstep_sets(self._sounds_dir or default_footstep_sounds_dir())
 
     @property
     def elevations(self) -> frozenset[int]:
@@ -216,6 +230,11 @@ class PlatformService:
             raise PlatformError("The world has reached its platform limit.")
         if not delete and not values:
             raise PlatformError("No platform property was supplied.")
+        if "footstepSet" in values and (
+            current is None or values["footstepSet"] != current.footstepSet
+        ):
+            if values["footstepSet"] not in {entry.id for entry in self.footstep_sets}:
+                raise PlatformError("Unknown platform footstep set.")
         data = current.model_dump() if current else {"id": str(uuid.uuid4())}
         data.update(values)
         if "name" in data:

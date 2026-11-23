@@ -73,6 +73,7 @@ export const ambianceTypeSchema = z.object({ id: z.string(), title: z.string(), 
 export const platformSchema = z.object({
   id: z.string(), name: z.string().min(1).max(100),
   startX: z.number().int(), startY: z.number().int(), endX: z.number().int(), endY: z.number().int(), z: z.number().int(),
+  footstepSet: z.string().min(1).optional(),
 });
 
 const doorOperation = z.enum(['add','update','remove','open','close','lock','unlock','keypad_begin','keypad_digit','keypad_cancel']);
@@ -160,6 +161,7 @@ export const welcomeMessageSchema = z.object({
       ),
       structurePresets: z.array(structurePresetSchema).optional(),
       ambianceTypes: z.array(ambianceTypeSchema).optional(),
+      footstepSets: z.array(z.object({ id: z.string().min(1), title: z.string().min(1), urls: z.array(z.string().min(1)) })).optional(),
     })
     .optional(),
   serverInfo: z
@@ -684,8 +686,8 @@ export type OutgoingMessage =
   | { type: 'item_use'; itemId: string }
   | { type: 'item_secondary_use'; itemId: string }
   | { type: 'region_add' }
-  | { type: 'platform_add'; requestId?: string; name: string; startX: number; startY: number; endX: number; endY: number; z: number }
-  | { type: 'platform_update'; platformId: string; requestId?: string; name?: string; startX?: number; startY?: number; endX?: number; endY?: number; z?: number }
+  | { type: 'platform_add'; requestId?: string; name: string; startX: number; startY: number; endX: number; endY: number; z: number; footstepSet?: string }
+  | { type: 'platform_update'; platformId: string; requestId?: string; name?: string; startX?: number; startY?: number; endX?: number; endY?: number; z?: number; footstepSet?: string }
   | { type: 'platform_delete'; platformId: string; requestId?: string }
   | { type: 'region_update'; regionId: string; name?: string }
   | { type: 'region_resize'; regionId: string; edge: 'west' | 'east' | 'south' | 'north'; delta: -1 | 1 }

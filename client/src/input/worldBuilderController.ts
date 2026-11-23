@@ -19,6 +19,7 @@ import {
 import { createCheckpointController } from './checkpointController';
 import { createRegionBuilderController } from './regionBuilderController';
 import { createPlatformBuilderController } from './platformBuilderController';
+import type { FootstepSet } from '../state/platformGeometry';
 import { createAmbianceBuilderController } from './ambianceBuilderController';
 import type { AmbianceType } from '../state/gameState';
 
@@ -568,6 +569,7 @@ export function createWorldBuilderController(deps: WorldBuilderDeps) {
     setAmbianceTypes(next: AmbianceType[]) {
       ambianceBuilderController.setTypes(next);
     },
+    setFootstepSets: (next: FootstepSet[]) => platformBuilderController.setFootstepSets(next),
     open,
     handleRoot,
     handleCheckpointInput: checkpointController.handleInput,

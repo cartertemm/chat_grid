@@ -2,6 +2,8 @@
 
 World Builder edits server-authoritative world geometry separately from runtime items. A wall run can contain doors along individual edges. A closed door inherits the current sound transmission and low-pass cutoff of its parent wall, including custom values. An open door allows sound through its edge. Both adjacent sides hear the opening and closing cues.
 
+Platforms have a **Footsteps** property using the shared option controls. The server discovers nonempty Ogg sample folders under `client/public/sounds/steps/` at startup. Folder names identify sets and may contain letters, digits, underscores and hyphens. The shipped `default` folder contains the original eleven step samples. Add real sample folders before restarting the server and publishing the matching client assets. A saved choice whose folder is unavailable falls back to the default sound, and other platform properties remain editable.
+
 ## Wall Runs
 
 A wall lives on grid edges and does not consume either neighboring cell. Its canonical persisted geometry is a first unit-edge anchor (`startX`, `startY`, `floorZ`), horizontal or vertical orientation, and a positive unit-edge count (`length`). It also has a title, movement rule, sound-transmission value, height, preset id, and contact sound.

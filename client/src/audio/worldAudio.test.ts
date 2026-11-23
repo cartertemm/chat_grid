@@ -72,7 +72,7 @@ describe('WorldAudioRouter', () => {
       () => false,
     );
 
-    router.playSample('/sounds/step-1.ogg', source);
+    router.playSample('/sounds/steps/default/step-1.ogg', source);
 
     expect(audio.playSpatialSample).not.toHaveBeenCalled();
   });
@@ -87,10 +87,10 @@ describe('WorldAudioRouter', () => {
       () => true,
     );
 
-    router.playSample('/sounds/step-1.ogg', { ...source, gain: 0.7, range: 12 });
+    router.playSample('/sounds/steps/default/step-1.ogg', { ...source, gain: 0.7, range: 12 });
 
     expect(audio.playSpatialSample).toHaveBeenCalledWith(
-      '/sounds/step-1.ogg',
+      '/sounds/steps/default/step-1.ogg',
       { ...source, gain: 0.7, range: 12 },
       listener,
       0.7,
@@ -123,7 +123,7 @@ describe('WorldAudioRouter', () => {
       () => true,
     );
 
-    router.playSample('/sounds/step-1.ogg', source);
+    router.playSample('/sounds/steps/default/step-1.ogg', source);
 
     expect(audio.playSpatialSample).not.toHaveBeenCalled();
   });

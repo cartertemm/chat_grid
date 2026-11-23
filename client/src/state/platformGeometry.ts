@@ -6,7 +6,10 @@ export type Platform = {
   startY: number;
   endX: number;
   endY: number;
+  footstepSet?: string;
 };
+
+export type FootstepSet = { id: string; title: string; urls: string[] };
 
 /** Older servers describe their full-square floors by elevation and grid size. */
 export function legacyPlatforms(size: number, floors = [

@@ -401,6 +401,12 @@ class PlatformAddPacket(BasePacket):
     endX: WorldCoordinate
     endY: WorldCoordinate
     z: WorldCoordinate
+    footstepSet: str = Field(
+        default="default",
+        min_length=1,
+        max_length=100,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$",
+    )
 
 
 class PlatformUpdatePacket(BasePacket):
@@ -415,6 +421,12 @@ class PlatformUpdatePacket(BasePacket):
     endX: WorldCoordinate | None = None
     endY: WorldCoordinate | None = None
     z: WorldCoordinate | None = None
+    footstepSet: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=100,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$",
+    )
 
 
 class PlatformDeletePacket(BasePacket):
@@ -704,6 +716,14 @@ class WallDoor(BaseModel):
     revision: StrictInt = Field(default=0, ge=0)
 
 
+class FootstepSet(BaseModel):
+    """One installed footstep directory and its client-safe sample URLs."""
+
+    id: str
+    title: str
+    urls: list[str]
+
+
 class Platform(BaseModel):
     """One named flat standing surface with inclusive integer coordinates."""
 
@@ -714,6 +734,12 @@ class Platform(BaseModel):
     endX: WorldCoordinate
     endY: WorldCoordinate
     z: WorldCoordinate
+    footstepSet: str = Field(
+        default="default",
+        min_length=1,
+        max_length=100,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$",
+    )
 
     def contains(self, x: int, y: int, z: int) -> bool:
         """Return whether the cell lies on this platform, including its edges."""
