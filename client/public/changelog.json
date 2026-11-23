@@ -1,8 +1,42 @@
 {
   "sections": [
     {
+      "date": "November 23, 2026",
+      "items": [
+        "Elevators can serve more than two stops and have an adjustable travel speed. Two-stop cars still select the other floor automatically. In larger elevators, choose your floor after boarding. If a stop opens over empty space, stepping out lands you on the highest platform below.",
+        "World Builder can create, resize, and name flat platforms. Connected platforms can form bridges and walkways, and each platform can have its own footstep sounds. Widgets can now occupy more than one square.",
+        "To mute one person’s voice just for yourself, select them in the user list and press the Applications key or Shift+F10. On touch, use Actions.",
+        "World Builder can save named checkpoints. Preview what a restore will change before applying it. Restoring also saves a checkpoint of the world you’re leaving.",
+        "Clocks gained 11 time-zone choices, including Phoenix, Adelaide, and Easter Island."
+      ]
+    },
+    {
+      "date": "November 18, 2026",
+      "items": [
+        "Add doors to walls in World Builder. A wall can have several doors, and a four-digit PIN can protect one or both sides. Unlocking a door leaves it closed until someone presses Enter to open it.",
+        "Use Duplicate here in the Z item menu to make an independent copy of an item. You own the copy and can edit it separately.",
+        "Give areas names with Regions in World Builder. Press C to hear your coordinates and any regions you’re in, smallest first. A closet inside a studio reads “Closet, Studio.”",
+        "Andrew Johnson (@akj) improved automatic reconnection after server restarts and made world saves more resilient to interruptions."
+      ]
+    },
+    {
+      "date": "September 9, 2026",
+      "items": [
+        "Non-radio items now share controls for emitted sounds, including range, volume, direction, and effects.",
+        "Added teleporters. Set a destination in x, y, z coordinates to travel between floors with your held items. Audio fades out at departure and back in at arrival.",
+        "Added ambiances to World Builder. Place a looping sound over a rectangular area and choose how far it fades beyond the edges."
+      ]
+    },
+    {
+      "date": "September 7, 2026",
+      "items": [
+        "Added optional HRTF spatial audio. Press Shift+4 to toggle it, Q or E to turn 45 degrees, and F to hear which way you’re facing. In HRTF mode, the arrow keys move relative to your facing direction."
+      ]
+    },
+    {
       "date": "September 6, 2026",
       "items": [
+        "Voice chat now recovers more reliably after network interruptions, microphone loss, and audio-device changes.",
         "You can now hold up to 2 items at once. Press H to hear what you are holding. You will also hear what others are holding if you list users, and can hand held items to others near you."
       ]
     },
