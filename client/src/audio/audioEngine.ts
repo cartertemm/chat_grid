@@ -26,6 +26,7 @@ export type SpatialPeerRuntime = {
   acousticGain?: number;
   occlusionLowpassHz?: number;
   listenGain?: number;
+  voiceMuted?: boolean;
   gain?: GainNode;
   occlusionFilter?: BiquadFilterNode;
   panner?: PannerNode;
@@ -374,6 +375,7 @@ export class AudioEngine {
 
     const sourceNode = this.audioCtx.createMediaStreamSource(stream);
     const gainNode = this.audioCtx.createGain();
+    gainNode.gain.value = 0;
     const occlusionFilter = this.audioCtx.createBiquadFilter();
     occlusionFilter.type = 'lowpass';
     occlusionFilter.frequency.value = 20_000;
@@ -407,7 +409,7 @@ export class AudioEngine {
         nearFieldGain: 1,
       }) : null;
       const listenGain = Number.isFinite(peer.listenGain) ? Math.max(0, peer.listenGain as number) : 1;
-      const scaledMix = mix ? { ...mix, gain: mix.gain * listenGain * acousticGain } : null;
+      const scaledMix = mix ? { ...mix, gain: peer.voiceMuted ? 0 : mix.gain * listenGain * acousticGain } : null;
       if (peer.occlusionFilter) {
         applyAcousticLowpass(this.audioCtx, peer.occlusionFilter, peer.occlusionLowpassHz ?? 20_000);
       }

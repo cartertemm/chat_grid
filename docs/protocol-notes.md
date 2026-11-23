@@ -54,6 +54,7 @@ This is a behavior guide for packet semantics beyond raw schemas.
 
 ## Server -> Client
 
+- Presence `update_position` includes `userId`, the stable account identifier behind the connection `id`. Welcome users carry the same identifier. Personal voice mute is local to the listener's browser and is keyed by grid endpoint, listener account, and speaker account. Incoming voice waits for signaling identity before audio attachment, including when LiveKit delivers a track before the presence packet. Anonymous speakers use connection-only mute preferences. Mute does not change per-speaker listen volume.
 - `auth_required`: authentication challenge after websocket connect.
   - includes `gridName`, `welcomeMessage`, `serverVersion`, and `expectedClientRevision`.
 - `auth_result`: auth success/failure and session/account metadata.

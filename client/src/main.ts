@@ -75,6 +75,7 @@ import {
   itemBounds,
   type StructurePreset,
   type GameMode,
+  type PeerState,
   type WorldItem,
 } from './state/gameState';
 import {
@@ -103,6 +104,8 @@ import { createItemPropertyEditor } from './items/itemPropertyEditor';
 import { createItemPropertyPresentation } from './items/itemPropertyPresentation';
 import { ItemBehaviorRegistry } from './items/types/behaviorRegistry';
 import { SettingsStore } from './settings/settingsStore';
+import { VoiceMutePreferences } from './settings/voiceMutePreferences';
+import { getUserActions } from './input/userActions';
 import { createAuthController } from './session/authController';
 import { runConnectFlow, runDisconnectFlow, type ConnectFlowDeps } from './session/connectionFlow';
 import { RECONNECT_MAX_ATTEMPTS, runReconnectAttempts } from './session/reconnect';
@@ -187,6 +190,8 @@ type Dom = {
   mobileCommands: HTMLButtonElement;
   mobileMute: HTMLButtonElement;
   mobileCommandDialog: HTMLDialogElement;
+  mobileSelectedUserRow: HTMLButtonElement;
+  mobileCommandTitle: HTMLElement;
   mobileCommandList: HTMLElement;
   mobileCommandClose: HTMLButtonElement;
   mobileTextEntry: HTMLFormElement;
@@ -246,6 +251,8 @@ const dom: Dom = {
   mobileCommands: requiredById('mobileCommands'),
   mobileMute: requiredById('mobileMute'),
   mobileCommandDialog: requiredById('mobileCommandDialog'),
+  mobileSelectedUserRow: requiredById('mobileSelectedUserRow'),
+  mobileCommandTitle: requiredById('mobileCommandTitle'),
   mobileCommandList: requiredById('mobileCommandList'),
   mobileCommandClose: requiredById('mobileCommandClose'),
   mobileTextEntry: requiredById('mobileTextEntry'),
@@ -334,6 +341,7 @@ const state = createInitialState();
 const renderer = new CanvasRenderer(dom.canvas);
 const audio = new AudioEngine();
 const settings = new SettingsStore();
+const voiceMutes = new VoiceMutePreferences(settings);
 let worldGridSize = GRID_SIZE;
 let movementTickMs = MOVE_COOLDOWN_MS;
 let wallEdgeIndex = buildWallEdgeIndex(state.structures.values());
@@ -485,6 +493,8 @@ const peerManager = new PeerManager(audio, updateStatus, {
   isSessionRunning: () => state.running,
   requestToken: () => signaling.send({ type: 'livekit_token_request' }),
 });
+
+peerManager.setVoiceMuteResolver((peer) => voiceMutes.isMuted(state.peers.get(peer.id) ?? peer));
 
 const teleportTransition = new TeleportTransitionController({
   setWorldTransitionGain: (gain, durationMs) => audio.setWorldTransitionGain(gain, durationMs),
@@ -1809,7 +1819,10 @@ function getConnectionFlowDeps(): ConnectFlowDeps {
     signalingSendAuth: () => sendAuthRequest(),
     signalingDisconnect: () => signaling.disconnect(),
     onMessage: (message, onWelcome) => onSignalingMessage(message as IncomingMessage, onWelcome),
-    peerManagerCleanupAll: () => peerManager.cleanupAll(),
+    peerManagerCleanupAll: () => {
+      peerManager.cleanupAll();
+      voiceMutes.clearSession();
+    },
     radioCleanupAll: () => radioRuntime.cleanupAll(),
     emitCleanupAll: () => {
       teleportTransition.reset();
@@ -2017,6 +2030,7 @@ async function onSignalingMessage(message: IncomingMessage, onWelcome?: () => vo
       (message.uiDefinitions as { adminMenu?: { actions?: Array<{ id: string; label: string }> } } | undefined)?.adminMenu?.actions ??
       message.auth?.adminMenuActions;
     authController.applyWelcomeAuth(message.auth, uiAdminActions);
+    voiceMutes.setScope(signalingUrl, authController.getAuthUserId());
     const incomingInstanceId = String(message.serverInfo?.instanceId ?? '').trim() || null;
     const incomingServerVersion = String(message.serverInfo?.serverVersion ?? '').trim() || 'unknown';
     const expectedClientRevision = String(message.serverInfo?.expectedClientRevision ?? '').trim();
@@ -2426,6 +2440,22 @@ function pingServerCommand(): void {
   signaling.send({ type: 'ping', clientSentAt: Date.now() });
 }
 
+function selectedUser(): PeerState | undefined {
+  return state.peers.get(state.sortedPeerIds[state.listIndex]);
+}
+
+function userListLabel(peer: PeerState): string {
+  return voiceMutes.isMuted(peer) ? `${peer.nickname}, voice muted for you` : peer.nickname;
+}
+
+function describeUserListRow(peer: PeerState): string {
+  const volume = formatSteppedNumber(getPeerListenGainForNickname(peer.nickname), MIC_INPUT_GAIN_STEP);
+  const direction = peer.z === state.player.z
+    ? distanceDirectionPhrase(state.player.x, state.player.y, peer.x, peer.y)
+    : 'different floor';
+  return `${userListLabel(peer)}, ${formatLastSeen(null, true)}, volume ${volume}, ${direction}, ${locationPhrase(peer.x, peer.y, peer.z)}${formatCarryingSuffix(state.items.values(), peer.id)}`;
+}
+
 function listUsersCommand(): void {
   if (state.peers.size === 0) {
     updateStatus('No users to list.');
@@ -2444,11 +2474,7 @@ function listUsersCommand(): void {
   }
   const userCount = state.sortedPeerIds.length;
   const userLabelText = userCount === 1 ? 'user' : 'users';
-  const gainPhrase = `volume ${formatSteppedNumber(getPeerListenGainForNickname(first.nickname), MIC_INPUT_GAIN_STEP)}`;
-  announceMenuEntry(
-    `${userCount} ${userLabelText}`,
-    `${first.nickname}, ${formatLastSeen(null, true)}, ${gainPhrase}, ${first.z === state.player.z ? distanceDirectionPhrase(state.player.x, state.player.y, first.x, first.y) : 'different floor'}, ${locationPhrase(first.x, first.y, first.z)}${formatCarryingSuffix(state.items.values(), first.id)}`,
-  );
+  announceMenuEntry(`${userCount} ${userLabelText}`, describeUserListRow(first));
 }
 
 function locateNearestUserCommand(): void {
@@ -2535,6 +2561,17 @@ const mainModeCommandHandlers: Record<MainModeCommand, () => void> = {
 };
 
 function getAvailableCommandPaletteEntriesForMode(mode: GameMode): Array<CommandDescriptor & { run: () => void | Promise<void> }> {
+  if (mode === 'listUsers') {
+    return getUserActions(state.sortedPeerIds[state.listIndex], {
+      getPeer: (id) => state.peers.get(id),
+      isMuted: (peer) => voiceMutes.isMuted(peer),
+      toggleMute: (peer) => {
+        voiceMutes.toggleMute(peer);
+        peerManager.refreshVoiceMutes();
+      },
+      announce: updateStatus,
+    });
+  }
   if (mode === 'normal') {
     const descriptors = getAvailableMainModeCommands({
       voiceSendAllowed: authController.getVoiceSendAllowed(),
@@ -2573,7 +2610,7 @@ function getAvailableCommandPaletteEntriesForMode(mode: GameMode): Array<Command
 }
 
 function canOpenCommandPaletteInMode(mode: GameMode): boolean {
-  return mode === 'normal' || mode === 'commandPalette' || itemBehaviorRegistry.canOpenModeCommandPalette(mode);
+  return mode === 'normal' || mode === 'listUsers' || mode === 'commandPalette' || itemBehaviorRegistry.canOpenModeCommandPalette(mode);
 }
 
 function openCommandPalette(): void {
@@ -2591,7 +2628,7 @@ function openCommandPalette(): void {
   commandPaletteIndex = 0;
   commandPaletteReturnMode = sourceMode;
   state.mode = 'commandPalette';
-  announceMenuEntry('Commands', formatCommandMenuLabel(commandPaletteCommands[0]));
+  announceMenuEntry(sourceMode === 'listUsers' ? 'User actions' : 'Commands', formatCommandMenuLabel(commandPaletteCommands[0]));
 }
 
 function executeCommandPaletteSelection(): void {
@@ -2822,10 +2859,7 @@ function handleListModeInput(code: string, key: string): void {
     state.listIndex = control.index;
     const entry = state.peers.get(state.sortedPeerIds[state.listIndex]);
     if (!entry) return;
-    const gainPhrase = `volume ${formatSteppedNumber(getPeerListenGainForNickname(entry.nickname), MIC_INPUT_GAIN_STEP)}`;
-    updateStatus(
-      `${entry.nickname}, ${formatLastSeen(null, true)}, ${gainPhrase}, ${entry.z === state.player.z ? distanceDirectionPhrase(state.player.x, state.player.y, entry.x, entry.y) : 'different floor'}, ${locationPhrase(entry.x, entry.y, entry.z)}${formatCarryingSuffix(state.items.values(), entry.id)}`,
-    );
+    updateStatus(describeUserListRow(entry));
     if (control.reason === 'initial') {
       audio.sfxUiBlip();
     }
@@ -3259,6 +3293,8 @@ mobileControls = setupMobileControls({
     commands: dom.mobileCommands,
     mute: dom.mobileMute,
     commandDialog: dom.mobileCommandDialog,
+    selectedUserRow: dom.mobileSelectedUserRow,
+    commandTitle: dom.mobileCommandTitle,
     commandList: dom.mobileCommandList,
     commandClose: dom.mobileCommandClose,
     textForm: dom.mobileTextEntry,
@@ -3271,6 +3307,10 @@ mobileControls = setupMobileControls({
   getMode: () => state.mode,
   getMuted: () => state.isMuted,
   getCommands: getMobileCommands,
+  getSelectedUserLabel: () => {
+    const peer = state.mode === 'listUsers' ? selectedUser() : undefined;
+    return peer ? userListLabel(peer) : null;
+  },
   dispatchInput: handleModeInput,
   pressDirection: pressMobileDirection,
   releaseDirection: releaseMobileDirection,

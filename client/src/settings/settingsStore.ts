@@ -12,6 +12,7 @@ const AUDIO_LAYER_STATE_STORAGE_KEY = 'chatGridAudioLayers';
 const MIC_INPUT_GAIN_STORAGE_KEY = 'chatGridMicInputGain';
 const MASTER_VOLUME_STORAGE_KEY = 'chatGridMasterVolume';
 const PEER_LISTEN_GAINS_STORAGE_KEY = 'chatGridPeerListenGains';
+const VOICE_MUTES_STORAGE_KEY = 'chatGridVoiceMutes';
 const NICKNAME_STORAGE_KEY = 'spatialChatNickname';
 const AUTH_USERNAME_STORAGE_KEY = 'chatGridAuthUsername';
 const LEGACY_AUTH_SESSION_TOKEN_STORAGE_KEY = 'chatGridAuthSessionToken';
@@ -32,6 +33,28 @@ type AudioDevicePreferences = {
  * Wraps localStorage reads/writes for client user settings.
  */
 export class SettingsStore {
+  loadVoiceMutes(scope: string): string[] {
+    try {
+      const parsed: unknown = JSON.parse(localStorage.getItem(VOICE_MUTES_STORAGE_KEY) || '{}');
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return [];
+      const values: unknown = (parsed as Record<string, unknown>)[scope];
+      return Array.isArray(values) ? values.filter((value): value is string => typeof value === 'string' && value.length > 0) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  saveVoiceMutes(scope: string, userIds: string[]): void {
+    try {
+      let scopes: Record<string, unknown> = {};
+      try {
+        const parsed: unknown = JSON.parse(localStorage.getItem(VOICE_MUTES_STORAGE_KEY) || '{}');
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) scopes = parsed as Record<string, unknown>;
+      } catch { /* Replace malformed preferences with the current scope. */ }
+      localStorage.setItem(VOICE_MUTES_STORAGE_KEY, JSON.stringify({ ...scopes, [scope]: userIds }));
+    } catch { /* Keep the in-memory choice when browser storage is unavailable. */ }
+  }
+
   loadEffectLevels(): Partial<Record<'reverb' | 'echo' | 'flanger' | 'high_pass' | 'low_pass' | 'off', number>> | null {
     const raw = localStorage.getItem(EFFECT_LEVELS_STORAGE_KEY);
     if (!raw) return null;
