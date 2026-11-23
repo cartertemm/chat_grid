@@ -43,7 +43,10 @@ async def test_capture_preview_restore_and_restart(make_world, tmp_path: Path):
     wall = world.server.structure_service.add_wall(
         owner, preset_id="brick", direction="north"
     )
-    captured = await request(world, owner, "capture", label="Before studio remodel")
+    captured = await request(
+        world, owner, "capture", label="Before studio remodel", requestId="capture-1"
+    )
+    assert captured.requestId == "capture-1"
     assert captured.ok and captured.checkpoints
     identifier = captured.checkpoints[0].id
     assert captured.checkpoints[0].counts["structures"] == 1

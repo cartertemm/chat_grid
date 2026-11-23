@@ -168,7 +168,7 @@ Metadata hides dependent controls with `visibleWhen: {"emitSound": "!"}`. Facing
 }
 ```
 
-- `timeZone`: one of the representative IANA zones in `CLOCK_TIME_ZONE_OPTIONS`.
+- `timeZone`: one of the representative IANA zones in `CLOCK_TIME_ZONE_OPTIONS`, including zones with distinct daylight-saving schedules.
   The concise menu covers every modern standard UTC offset globally and at least one
   city or region for each standard offset used within Africa, Asia, Europe, North
   America, South America, and Australia/Oceania. Antarctica is represented by its

@@ -442,6 +442,7 @@ class CheckpointActionPacket(BasePacket):
 
     type: Literal["checkpoint_action"]
     action: Literal["capture", "list", "preview", "restore"]
+    requestId: str | None = Field(default=None, min_length=1, max_length=100)
     label: str = Field(default="", max_length=100)
     checkpointId: str | None = Field(default=None, min_length=1, max_length=100)
     page: int = Field(default=0, ge=0, le=100000)
@@ -1109,6 +1110,7 @@ class CheckpointResultPacket(BasePacket):
 
     type: Literal["checkpoint_result"]
     action: Literal["capture", "list", "preview", "restore"]
+    requestId: str | None = None
     ok: bool
     message: str
     checkpoints: list[CheckpointSummary] | None = None

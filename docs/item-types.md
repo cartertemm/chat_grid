@@ -156,7 +156,7 @@ Radio retains its stream, volume, effects, range, and facing controls; it has no
 - No text chat line is emitted for clock `use`.
 
 ### Validation
-- `timeZone`: one of `CLOCK_TIME_ZONE_OPTIONS` in `server/app/item_catalog.py`; the concise list covers every modern standard UTC offset globally plus regional coverage per continent. Antarctica uses station zones, and `Etc/GMT+12` represents the uninhabited UTC−12 offset.
+- `timeZone`: one of `CLOCK_TIME_ZONE_OPTIONS` in `server/app/item_catalog.py`; the concise list covers every modern standard UTC offset globally plus regional representatives and distinct seasonal clock changes. For example, Phoenix stays on UTC-7 when Denver advances, and Sydney advances when Brisbane stays on standard time. Antarctica uses station zones, and `Etc/GMT+12` represents the uninhabited UTC−12 offset.
 - `use24Hour`: boolean or on/off style input
 - `topOfHourAnnounce`: boolean or on/off style input
 - `alarmEnabled`: boolean or on/off style input

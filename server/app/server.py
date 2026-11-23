@@ -2567,6 +2567,7 @@ class SignalingServer:
 
         result = CheckpointResultPacket(
             type="checkpoint_result",
+            requestId=packet.requestId,
             action=packet.action,
             ok=False,
             message="Not authorized to manage world checkpoints.",
@@ -2718,6 +2719,7 @@ class SignalingServer:
                     client,
                     CheckpointResultPacket(
                         type="checkpoint_result",
+                        requestId=packet.requestId,
                         action=packet.action,
                         ok=False,
                         message=rejection,
