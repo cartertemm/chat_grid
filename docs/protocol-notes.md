@@ -29,6 +29,7 @@ This is a behavior guide for packet semantics beyond raw schemas.
 - `admin_users_list`: request the read-only registered-user list with no `action` (`user.list` permission), or request targets for an administration action (`action`: `set_role | ban | unban | delete_account`, gated by that action's permission).
 - `admin_user_set_role`: set target user role.
 - `admin_user_ban` / `admin_user_unban`: disable/enable user account. A ban closes every authenticated connection for that user.
+- Disabling or deleting an account also discards its world actions still waiting for the world mutation gate.
 - `admin_user_delete`: permanently delete target account and close every authenticated connection for that user.
 - `update_position`: client movement intent with `x`, `y`, and `z`; server enforces bounds, wall crossings, rate policy, and an unchanged floor. Movement does not change the server-owned facing.
 - `turn`: request a validated 45-degree relative turn in either audio mode with `{ "type": "turn", "direction": "left" | "right" }`; the server persists the resulting facing and republishes the canonical position.

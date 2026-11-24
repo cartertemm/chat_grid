@@ -2790,6 +2790,9 @@ class SignalingServer:
     ) -> None:
         """Serialize gameplay mutations with checkpoint publication and restore."""
 
+        if client.revoked:
+            return
+
         if isinstance(packet, CheckpointActionPacket):
             await self._handle_checkpoint_packet(client, packet)
             return
