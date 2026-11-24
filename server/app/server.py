@@ -257,6 +257,7 @@ class SignalingServer:
         self.max_message_size = max_message_size
         self._ssl_context = self._build_ssl_context(ssl_cert, ssl_key)
         self.clients: dict[ServerConnection, ClientConnection] = {}
+        self.authenticated_clients: dict[ServerConnection, ClientConnection] = {}
         self.delivery = Delivery(transport or WebsocketTransport(), self.clients)
         resolved_auth_db_path = auth_db_path or Path.cwd() / "runtime" / "chatgrid.db"
         auth_secret = (
@@ -781,13 +782,32 @@ class SignalingServer:
             ),
         )
 
+    def _connections_for_user(self, user_id: str) -> list[ClientConnection]:
+        """Return every authenticated connection for one user, joined or not."""
+
+        return [
+            connection
+            for connection in self.authenticated_clients.values()
+            if connection.user_id == user_id
+        ]
+
+    async def _close_with_auth_failure(
+        self, client: ClientConnection, message: str
+    ) -> None:
+        """Tell one connection its account is no longer usable, then close it."""
+
+        await self.delivery.send(
+            client, AuthResultPacket(type="auth_result", ok=False, message=message)
+        )
+        await client.websocket.close()
+
     async def _sync_permissions_for_user_ids(self, user_ids: list[str]) -> None:
-        """Refresh and push permissions for active websocket clients matching user ids."""
+        """Refresh and push permissions for authenticated clients matching user ids."""
 
         wanted = {str(user_id) for user_id in user_ids}
         if not wanted:
             return
-        for active in self.clients.values():
+        for active in list(self.authenticated_clients.values()):
             if not active.user_id or active.user_id not in wanted:
                 continue
             await self._send_auth_permissions(active)
@@ -1110,6 +1130,7 @@ class SignalingServer:
             )
         finally:
             async with self._world_gate.operation():
+                self.authenticated_clients.pop(websocket, None)
                 if websocket in self.clients:
                     disconnected = self.clients.pop(websocket)
                     # Each step is guarded so one failure cannot skip the rest or
@@ -1474,6 +1495,7 @@ class SignalingServer:
             self._clear_auth_failures(client, packet)
 
         client.authenticated = True
+        self.authenticated_clients[client.websocket] = client
         client.user_id = session.user.id
         client.username = session.user.username
         client.role = session.user.role
@@ -2475,16 +2497,10 @@ class SignalingServer:
                 return True
             if target_id:
                 await self._sync_permissions_for_user_ids([target_id])
-                for active in list(self.clients.values()):
-                    if active.user_id != target_id:
-                        continue
-                    await self.delivery.send(
-                        active,
-                        AuthResultPacket(
-                            type="auth_result", ok=False, message="Account is disabled."
-                        ),
+                for connection in self._connections_for_user(target_id):
+                    await self._close_with_auth_failure(
+                        connection, "Account is disabled."
                     )
-                    await active.websocket.close()
             LOGGER.info("user banned actor=%s target=%s", client.user_id, username)
             await self._send_admin_action_result(
                 client,
@@ -2528,16 +2544,8 @@ class SignalingServer:
                 await deny("user_delete", str(exc))
                 return True
             if target_id:
-                for active in list(self.clients.values()):
-                    if active.user_id != target_id:
-                        continue
-                    await self.delivery.send(
-                        active,
-                        AuthResultPacket(
-                            type="auth_result", ok=False, message="Account deleted."
-                        ),
-                    )
-                    await active.websocket.close()
+                for connection in self._connections_for_user(target_id):
+                    await self._close_with_auth_failure(connection, "Account deleted.")
             LOGGER.info("user deleted actor=%s target=%s", client.user_id, username)
             await self._send_admin_action_result(
                 client,
@@ -2684,6 +2692,13 @@ class SignalingServer:
 
         if isinstance(packet, WelcomeReadyPacket):
             async with self._world_gate.operation():
+                user = self.auth_service.get_user_by_id(client.user_id or "")
+                if user is None:
+                    await self._close_with_auth_failure(client, "Account deleted.")
+                    return
+                if user.status != "active":
+                    await self._close_with_auth_failure(client, "Account is disabled.")
+                    return
                 await self._activate_authenticated_client(client)
             return
 
