@@ -801,6 +801,25 @@ class SignalingServer:
         )
         await client.websocket.close()
 
+    async def _revoke_user_connections(self, user_id: str, message: str) -> None:
+        """Revoke every connection for one user, then notify and close each one."""
+
+        connections = self._connections_for_user(user_id)
+        for connection in connections:
+            connection.revoked = True
+        results = await asyncio.gather(
+            *(
+                self._close_with_auth_failure(connection, message)
+                for connection in connections
+            ),
+            return_exceptions=True,
+        )
+        for connection, result in zip(connections, results):
+            if isinstance(result, Exception):
+                LOGGER.warning(
+                    "revoked connection close failed id=%s: %s", connection.id, result
+                )
+
     async def _sync_permissions_for_user_ids(self, user_ids: list[str]) -> None:
         """Refresh and push permissions for authenticated clients matching user ids."""
 
@@ -1440,6 +1459,10 @@ class SignalingServer:
                 return True
             else:
                 return False
+            current_user = self.auth_service.get_user_by_id(session.user.id)
+            if current_user is None or current_user.status != "active":
+                self.auth_service.revoke(session.token)
+                raise AuthError("Account is disabled.")
         except AuthError as exc:
             if isinstance(
                 packet, (AuthLoginPacket, AuthRegisterPacket, AuthResumePacket)
@@ -2496,11 +2519,7 @@ class SignalingServer:
                 await deny("user_ban", str(exc))
                 return True
             if target_id:
-                await self._sync_permissions_for_user_ids([target_id])
-                for connection in self._connections_for_user(target_id):
-                    await self._close_with_auth_failure(
-                        connection, "Account is disabled."
-                    )
+                await self._revoke_user_connections(target_id, "Account is disabled.")
             LOGGER.info("user banned actor=%s target=%s", client.user_id, username)
             await self._send_admin_action_result(
                 client,
@@ -2544,8 +2563,7 @@ class SignalingServer:
                 await deny("user_delete", str(exc))
                 return True
             if target_id:
-                for connection in self._connections_for_user(target_id):
-                    await self._close_with_auth_failure(connection, "Account deleted.")
+                await self._revoke_user_connections(target_id, "Account deleted.")
             LOGGER.info("user deleted actor=%s target=%s", client.user_id, username)
             await self._send_admin_action_result(
                 client,
@@ -2662,6 +2680,8 @@ class SignalingServer:
     async def _handle_message(self, client: ClientConnection, raw_message: str) -> None:
         """Decode, validate, and route one inbound client packet."""
 
+        if client.revoked:
+            return
         try:
             payload = json.loads(raw_message)
         except json.JSONDecodeError:
