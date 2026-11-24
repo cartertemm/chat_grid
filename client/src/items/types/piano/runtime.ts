@@ -267,18 +267,8 @@ export class PianoController {
   stopUseMode(announce = true): void {
     if (!this.activePianoItemId) return;
     this.stopDemo(true);
-    const itemId = this.activePianoItemId;
-    for (const code of Array.from(this.activePianoKeys)) {
-      const midi = this.activePianoKeyMidi.get(code);
-      if (typeof midi !== 'number' || !Number.isFinite(midi)) continue;
-      this.deps.signalingSend({ type: 'item_piano_note', itemId, keyId: code, midi, on: false });
-      this.pianoSynth.noteOff(code);
-    }
+    this.releaseHeldNotes();
     this.activePianoItemId = null;
-    this.activePianoKeys.clear();
-    this.activePianoKeyMidi.clear();
-    this.activePianoHeldOrder.length = 0;
-    this.activePianoMonophonicKey = null;
     this.activePianoRecordingState = 'idle';
     this.deps.state.mode = 'normal';
     if (announce) {
@@ -415,6 +405,22 @@ export class PianoController {
       this.activePianoMonophonicKey = input.code;
     }
     this.playLocalNote(item, itemId, input.code, playedMidi, config);
+  }
+
+  /** Sends note-off for every held piano key and clears held-key state. */
+  releaseHeldNotes(): void {
+    const itemId = this.activePianoItemId;
+    if (!itemId) return;
+    for (const code of Array.from(this.activePianoKeys)) {
+      const midi = this.activePianoKeyMidi.get(code);
+      if (typeof midi !== 'number' || !Number.isFinite(midi)) continue;
+      this.deps.signalingSend({ type: 'item_piano_note', itemId, keyId: code, midi, on: false });
+      this.pianoSynth.noteOff(code);
+    }
+    this.activePianoKeys.clear();
+    this.activePianoKeyMidi.clear();
+    this.activePianoHeldOrder.length = 0;
+    this.activePianoMonophonicKey = null;
   }
 
   /** Handles key release while in piano mode, including mono fallback retrigger behavior. */
@@ -847,6 +853,7 @@ export class PianoController {
       return false;
     }
     if (commandId === 'openHelp') {
+      this.releaseHeldNotes();
       this.deps.openHelpViewer(this.helpViewerLines, 'pianoUse');
       return true;
     }

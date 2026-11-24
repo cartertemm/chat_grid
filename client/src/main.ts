@@ -3296,6 +3296,7 @@ setupKeyboardInputHandlers({
       shiftKey,
     });
   },
+  onReleaseAllKeys: () => itemBehaviorRegistry.releaseHeldKeys(),
   pasteIntoActiveTextInput,
   updateStatus,
   setReplaceTextOnNextType: (value) => {

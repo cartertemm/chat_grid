@@ -48,6 +48,9 @@ export function createPianoBehavior(deps: ItemBehaviorDeps): ItemBehavior {
       controller.handleModeKeyUp(input);
       return true;
     },
+    releaseHeldKeys: () => {
+      controller.releaseHeldNotes();
+    },
     canOpenModeCommandPalette: (mode) => mode === 'pianoUse',
     getModeKeyUpTarget: (activeMode, returnMode) => {
       if (activeMode === 'pianoUse') return 'pianoUse';
