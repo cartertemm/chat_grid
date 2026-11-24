@@ -2711,15 +2711,17 @@ class SignalingServer:
             return
 
         if isinstance(packet, WelcomeReadyPacket):
+            rejection = None
             async with self._world_gate.operation():
                 user = self.auth_service.get_user_by_id(client.user_id or "")
                 if user is None:
-                    await self._close_with_auth_failure(client, "Account deleted.")
-                    return
-                if user.status != "active":
-                    await self._close_with_auth_failure(client, "Account is disabled.")
-                    return
-                await self._activate_authenticated_client(client)
+                    rejection = "Account deleted."
+                elif user.status != "active":
+                    rejection = "Account is disabled."
+                else:
+                    await self._activate_authenticated_client(client)
+            if rejection is not None:
+                await self._close_with_auth_failure(client, rejection)
             return
 
         if isinstance(packet, PingPacket):
