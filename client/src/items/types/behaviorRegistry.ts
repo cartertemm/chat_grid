@@ -77,6 +77,13 @@ export class ItemBehaviorRegistry {
     return false;
   }
 
+  /** Releases keys that item behaviors still treat as held, such as after the window loses focus. */
+  releaseHeldKeys(): void {
+    for (const behavior of this.behaviors) {
+      behavior.releaseHeldKeys?.();
+    }
+  }
+
   /** Returns whether any item-owned mode supports opening the command palette. */
   canOpenModeCommandPalette(mode: GameMode): boolean {
     for (const behavior of this.behaviors) {

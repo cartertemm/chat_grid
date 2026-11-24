@@ -66,15 +66,16 @@ function setup() {
     items,
     player: { id: 'listener', x: listener.x, y: listener.y, z: listener.z, acousticZoneId: listener.acousticZoneId },
   };
+  const signalingSend = vi.fn();
   const controller = new PianoController({
     state,
     audio,
-    signalingSend: vi.fn(),
+    signalingSend,
     updateStatus: vi.fn(),
     openHelpViewer: vi.fn(),
     getWallAcousticMix: vi.fn(() => ({ gain: 1, lowpassHz: 20_000 })),
   });
-  return { audio, controller, item, items, listener, transmission, updateSpatialAudio };
+  return { audio, controller, item, items, listener, signalingSend, transmission, updateSpatialAudio };
 }
 
 beforeEach(() => {
@@ -165,5 +166,38 @@ describe('PianoController spatial audio', () => {
     await Promise.resolve();
     spatial = synth.noteOn.mock.calls[synth.noteOn.mock.calls.length - 1]?.[10] as PianoSpatialSource;
     expect(spatial.useTransmission).toBe(false);
+  });
+});
+
+describe('PianoController held notes', () => {
+  it('releases held notes when help opens', async () => {
+    const { controller, item, signalingSend } = setup();
+    await controller.startUseMode(item.id);
+    controller.handleModeInput({ code: 'KeyA', key: 'a', ctrlKey: false, shiftKey: false });
+    const synth = piano.MockPianoSynth.instances[0]!;
+    signalingSend.mockClear();
+
+    controller.handleModeInput({ code: 'Slash', key: '?', ctrlKey: false, shiftKey: true });
+
+    expect(synth.noteOff).toHaveBeenCalledWith('KeyA');
+    expect(signalingSend).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'item_piano_note', itemId: item.id, keyId: 'KeyA', on: false,
+    }));
+  });
+
+  it('releases held notes without leaving piano mode', async () => {
+    const { controller, item, signalingSend } = setup();
+    await controller.startUseMode(item.id);
+    controller.handleModeInput({ code: 'KeyA', key: 'a', ctrlKey: false, shiftKey: false });
+    const synth = piano.MockPianoSynth.instances[0]!;
+    signalingSend.mockClear();
+
+    controller.releaseHeldNotes();
+    controller.handleModeKeyUp({ code: 'KeyA', shiftKey: false });
+
+    expect(synth.noteOff).toHaveBeenCalledTimes(1);
+    expect(signalingSend).toHaveBeenCalledTimes(1);
+    controller.handleModeInput({ code: 'KeyA', key: 'a', ctrlKey: false, shiftKey: false });
+    expect(synth.noteOn).toHaveBeenCalledTimes(2);
   });
 });

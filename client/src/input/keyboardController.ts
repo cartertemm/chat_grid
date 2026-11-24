@@ -21,6 +21,7 @@ type KeyboardControllerDeps = {
   openCommandPalette: () => void;
   getModeKeyUpTarget: (activeMode: GameMode) => GameMode | null;
   onModeKeyUp: (mode: GameMode, input: Pick<ModeInput, 'code' | 'shiftKey'>) => void;
+  onReleaseAllKeys: () => void;
   pasteIntoActiveTextInput: (text: string) => boolean;
   updateStatus: (message: string) => void;
   setReplaceTextOnNextType: (value: boolean) => void;
@@ -173,6 +174,18 @@ export function setupKeyboardInputHandlers(deps: KeyboardControllerDeps): void {
     if (event.code && event.code !== code) {
       deps.state.keysPressed[event.code] = false;
     }
+  });
+
+  function releaseAllKeys(): void {
+    for (const code of Object.keys(deps.state.keysPressed)) {
+      deps.state.keysPressed[code] = false;
+    }
+    deps.onReleaseAllKeys();
+  }
+
+  window.addEventListener('blur', releaseAllKeys);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) releaseAllKeys();
   });
 
   document.addEventListener('paste', (event) => {

@@ -37,6 +37,7 @@ export type ItemBehavior = {
   onWorldUpdate?: () => void;
   handleModeInput?: (mode: GameMode, input: ModeInput) => boolean;
   handleModeKeyUp?: (mode: GameMode, input: Pick<ModeInput, 'code' | 'shiftKey'>) => boolean;
+  releaseHeldKeys?: () => void;
   canOpenModeCommandPalette?: (mode: GameMode) => boolean;
   getModeKeyUpTarget?: (activeMode: GameMode, returnMode: GameMode) => GameMode | null;
   getModeCommands?: (mode: GameMode) => CommandDescriptor[];
